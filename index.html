@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover is what activates env(safe-area-inset-*). Without it
+         every inset resolves to 0px and the safe-area handling in the app
+         silently does nothing on a real iPhone. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#121212" />
+    <meta name="color-scheme" content="dark" />
+    <title>Y$ER Flow</title>
+
+    <!-- ═══════════════════════ LAUNCH INTRO ═══════════════════════
+         Inline, and inline on purpose. A React component cannot paint
+         until the bundle has downloaded, parsed and mounted — which is
+         exactly the gap this exists to cover, so it would show an empty
+         dark screen and *then* begin. Here it is on the first frame and
+         animates while the bundle is still arriving. React mounts
+         underneath it the whole time; the intro never delays the app.
+
+         It must also not depend on JavaScript to get out of the way.
+         The letters are written into the HTML rather than built by
+         script, and the fade is a CSS animation ending at opacity 0 /
+         visibility hidden. So if the bundle fails outright, the intro
+         still clears itself and leaves a working page behind. The
+         script below only wires the skip and removes the dead node —
+         cleanup, not the mechanism.
+    ═════════════════════════════════════════════════════════════ -->
+    <style>
+      /* Set here as well as in the app: this is the only stylesheet that
+         exists before the bundle lands, and without it iOS overscroll
+         flashes white behind the intro. */
+      html, body { margin: 0; background: #121212; }
+
+      /* Instrument Serif, self-hosted rather than pulled from Google's CDN.
+         SIL Open Font License, so redistribution is fine, and a font served
+         from our own origin cannot be blocked by whatever Content-Security-
+         Policy the host frame happens to set. 15.7KB, latin only.
+
+         font-display:swap because the only thing wearing it is the signature
+         at the foot of the calculator — nothing above the fold should ever
+         wait on it. If it never arrives, the fallback is a serif italic and
+         the signature still reads as one. */
+      @font-face {
+        font-family: "Instrument Serif";
+        font-style: italic;
+        font-weight: 400;
+        font-display: swap;
+        /* __ASSET_BASE__ is substituted at build time — "./" for GitHub Pages,
+           "/" for Vercel, where Whop frames this at a path of its own choosing
+           and a relative URL would resolve against that path instead. Vite
+           leaves url() inside an inline <style> alone, so the swap is done by
+           the small plugin in vite.config.js. */
+        src: url("__ASSET_BASE__fonts/instrument-serif-italic.woff2") format("woff2");
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+                       U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191,
+                       U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+
+      #intro {
+        --intro-hold: 1150ms;   /* wordmark on screen */
+        --intro-out: 380ms;     /* fade to the app */
+
+        position: fixed;
+        inset: 0;
+        z-index: 9999;          /* over .pane (100) and .tabbar-dock (120) */
+        display: grid;
+        place-items: center;
+        /* Flat #121212 and nothing else — the same ground the app paints.
+           This used to carry a copy of the app's radial wash so the two would
+           agree at the handoff. The wash is gone (it showed on Sessions and
+           behind this overlay but not on the calculator, which covered it with
+           opaque panels), and matching a plain colour is a stronger guarantee
+           than matching two gradients: there is nothing left to drift apart.
+           The intro is a separate inline document, so keep this in step with
+           html/body above and the ground note in shell.css. */
+        background: #121212;
+        animation: introOut var(--intro-out) cubic-bezier(.4, 0, .2, 1)
+                   var(--intro-hold) both;
+      }
+      @keyframes introOut {
+        from { opacity: 1; transform: scale(1); }
+        to   { opacity: 0; transform: scale(1.04);
+               visibility: hidden; pointer-events: none; }
+      }
+
+      .intro-mark {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: clamp(11px, 3.2vw, 18px);
+      }
+
+      /* Ticker. Monospaced and on a fixed pitch, which is where the mark
+         comes from rather than from type for its own sake: futures are
+         read on terminals, and it is the same tabular logic the
+         calculator already uses for its numerals.
+
+         Positive tracking is correct HERE and nowhere else in the set —
+         a mono face is already evenly spaced, so a little extra opens the
+         rhythm out instead of breaking the word apart. */
+      .intro-word {
+        display: flex;
+        align-items: baseline;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+        font-size: clamp(22px, 7.4vw, 42px);
+        font-weight: 700;
+        letter-spacing: .06em;
+        color: #fff;
+      }
+      .intro-word .g { display: flex; }
+      .intro-word .g.ac { color: #0a84ff; }   /* the app's own accent */
+      .intro-word .sp { width: .62em; }       /* the word gap, as a box, so
+                                                 flex cannot collapse it */
+      .intro-word span span {
+        display: inline-block;
+        will-change: transform, opacity, filter;
+        animation: introSettle .78s cubic-bezier(.19, 1, .22, 1) both;
+        animation-delay: calc(var(--i) * 34ms);
+      }
+      @keyframes introSettle {
+        from { opacity: 0; filter: blur(9px); transform: translateY(9px) scale(1.14); }
+        to   { opacity: 1; filter: blur(0);   transform: none; }
+      }
+
+      /* A single pass of light across the wordmark, once the letters have
+         landed. background-clip:text on a gradient that is wider than the
+         element, moved by background-position — so the only thing changing per
+         frame is where a gradient is sampled on ~200x40 pixels of text. No
+         layout, no new layer, and nothing that grows with the size of the app
+         mounting underneath it.
+
+         That last point is the whole reason it is built this way. This overlay
+         is on screen while the bundle is still downloading and parsing, and the
+         last time something expensive ran here it showed up as 175-215ms
+         main-thread blocks that stopped the dial's sweep dead. Cheap is not a
+         nicety on this element. */
+      .intro-word .g {
+        background-image: linear-gradient(
+          100deg,
+          transparent 42%,
+          rgba(255, 255, 255, .85) 50%,
+          transparent 58%
+        );
+        background-size: 260% 100%;
+        background-position: 150% 0;
+        background-repeat: no-repeat;
+        animation: introSheen 900ms cubic-bezier(.5, 0, .3, 1) 620ms both;
+      }
+      /* The sheen paints INTO the letters, so it has to composite over the
+         colour rather than replace it — the accent group would otherwise turn
+         white for the length of the pass. */
+      @keyframes introSheen {
+        from { background-position: 150% 0; }
+        to   { background-position: -60% 0; }
+      }
+      @supports (background-clip: text) or (-webkit-background-clip: text) {
+        .intro-word .g {
+          -webkit-background-clip: text;
+          background-clip: text;
+        }
+      }
+
+      .intro-rule {
+        height: 1px;
+        width: 0;
+        max-width: 70%;
+        border-radius: 2px;
+        background: linear-gradient(90deg, transparent, #0a84ff, transparent);
+        animation: introRule .62s cubic-bezier(.22, .9, .28, 1) .34s both;
+      }
+      @keyframes introRule { from { width: 0; } to { width: 78%; } }
+      /* It draws in and then draws OUT, rather than being carried off by the
+         overlay's fade. A line that retracts reads as the screen finishing;
+         a line that dissolves reads as the screen being interrupted. Timed to
+         land just before --intro-hold ends. */
+      .intro-rule::after {
+        content: "";
+        position: absolute; inset: 0;
+        background: #121212;
+        transform: scaleX(0);
+        transform-origin: right center;
+        animation: introRuleOut 260ms cubic-bezier(.5, 0, .75, 0) 980ms both;
+      }
+      .intro-rule { position: relative; overflow: hidden; }
+      @keyframes introRuleOut { to { transform: scaleX(1); } }
+
+      .intro-sub {
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+        font-size: clamp(9px, 2.8vw, 12px);
+        font-weight: 600;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, .32);
+        animation: introSub .5s ease .52s both;
+      }
+      @keyframes introSub {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: none; }
+      }
+
+      /* Tap, click or any key ends it now. Nobody should be held behind
+         an animation they have already seen. */
+      #intro.intro-skip { animation: introOut .18s ease both; }
+      #intro.intro-skip .intro-word span span,
+      #intro.intro-skip .intro-rule,
+      #intro.intro-skip .intro-sub { animation-play-state: paused; }
+
+      /* No blur, no travel, no stagger — and shorter, because for someone
+         who asked for less motion a splash screen is just a delay. */
+      @media (prefers-reduced-motion: reduce) {
+        #intro { --intro-hold: 620ms; --intro-out: 220ms; }
+        #intro .intro-word span span {
+          animation: introPlain .22s ease both;
+          animation-delay: 0s;
+        }
+        #intro .intro-rule { animation-duration: .22s; animation-delay: .05s; }
+        #intro .intro-sub  { animation-duration: .22s; animation-delay: .08s; }
+        @keyframes introPlain { from { opacity: 0; } to { opacity: 1; } }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- Letters are static markup, not generated, so the wordmark renders
+         with scripting off. --i drives the arrival stagger. -->
+    <div id="intro" aria-hidden="true">
+      <div class="intro-mark">
+        <div class="intro-word" aria-label="YSER FLOW">
+          <span class="g"><span style="--i:0">Y</span><span style="--i:1">S</span><span style="--i:2">E</span><span style="--i:3">R</span></span>
+          <span class="sp"></span>
+          <span class="g ac"><span style="--i:4">F</span><span style="--i:5">L</span><span style="--i:6">O</span><span style="--i:7">W</span></span>
+        </div>
+        <div class="intro-rule"></div>
+        <div class="intro-sub">Futures risk · live sessions</div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        var el = document.getElementById('intro');
+        if (!el) return;
+        function skip() { el.classList.add('intro-skip'); }
+        // once:true so the listeners cannot outlive the element
+        ['pointerdown', 'keydown'].forEach(function (ev) {
+          window.addEventListener(ev, skip, { once: true, passive: true });
+        });
+        // Only the container's own fade ends the intro — the letters and the
+        // rule finish first and their events bubble to the same handler.
+        el.addEventListener('animationend', function (e) {
+          if (e.target === el) el.remove();
+        });
+      })();
+    </script>
+
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

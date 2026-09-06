@@ -1,0 +1,900 @@
+/* ===========================================================================
+   Shell chrome: the floating glass tab pill, the panes it switches between,
+   and the background layer that gives its blur something to act on.
+   =========================================================================== */
+
+:root {
+  --tabbar-h: 56px;
+  --tabbar-gap: 14px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --tabbar-reserve: calc(var(--tabbar-h) + var(--tabbar-gap) * 2 + var(--safe-b));
+}
+
+/* ---------------------------------------------------------------------------
+   THE GROUND IS FLAT. #121212, edge to edge, and nothing paints over it.
+
+   There used to be a .bg-layer here carrying two very soft radials, on the
+   argument that backdrop-filter over a flat colour samples a constant and is
+   therefore a no-op — the tab pill would read as a plain dark chip with nothing
+   to blur. The argument was sound and the result was still wrong: the calculator
+   is a column of opaque panels that covered the wash, so the two pools only ever
+   showed on Sessions and behind the launch intro. Two of the four surfaces had a
+   background the other two did not.
+
+   The pill loses nothing. It never needed the wash — it needed *content*
+   underneath, which is what it has: panels scroll under it on the calculator,
+   the vendored documents scroll under it in the editor and the guide, and the
+   drifting field in Sessions.jsx passes under it on the dial. All of that is
+   real detail to smear, which a static gradient never was.
+
+   Keep #121212 in step with html/body in index.html and #intro's background
+   there. Three declarations, one colour, and a mismatch shows as a step at the
+   launch handoff.
+--------------------------------------------------------------------------- */
+
+/* --------------------------------- dock ----------------------------------
+   The dock moves; the bar does not. That split is the whole fix for the stray
+   light that flashed along the pill's edge as it slid away.
+
+   A backdrop-filtered element that is itself being transformed has to re-sample
+   its backdrop every frame while the compositor is also moving its layer, and
+   WebKit resolves that race by sampling stale or empty content — which paints
+   as a bright rim for a frame or two. Animating the wrapper instead means the
+   filtered element never changes its own transform, so there is nothing to
+   race. The opacity fade went with it for the same reason: fading a
+   backdrop-filtered layer composites it separately and lights the same edge.
+   It only ever slides now, which reads cleaner anyway.
+-------------------------------------------------------------------------- */
+.tabbar-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--tabbar-gap) + var(--safe-b));
+  display: flex;
+  justify-content: center;
+  pointer-events: none;   /* only the pill itself is interactive */
+  z-index: 120;           /* .main-panel is a z-index:20 stacking context, so
+                             .dropdown-menu's z-index:50 is local to it and its
+                             effective root layer is 20. 120 is headroom. */
+  transition: transform 0.26s cubic-bezier(.22, .8, .3, 1);
+  will-change: transform;
+}
+
+.tabbar-dock-hidden {
+  transform: translateY(calc(var(--tabbar-h) + var(--tabbar-gap) + var(--safe-b) + 14px));
+}
+.tabbar-dock-hidden .tabbar { pointer-events: none; }
+
+/* ---------------------------------- bar ----------------------------------- */
+.tabbar {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--tabbar-h);
+  padding: 6px;
+  border-radius: 999px;
+
+  /* blur(7px) — the app's own .glass token, unchanged. It reads here because
+     content passes underneath rather than stopping short of the pill, so the
+     filter always has something to act on.
+
+     No drop shadow, and none coming back. A 1px hairline at low alpha does the
+     separating; the inset is a top edge catching light, not a cast shadow.
+     Whole pixels, not 0.5 — a fractional border lands between device pixels
+     and shimmers whenever the dock is mid-slide. */
+  background: rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.tabbar-btn {
+  width: 48px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  padding: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.tabbar-btn:active { transform: scale(0.94); }
+.tabbar-btn-active {
+  background: rgba(10, 132, 255, 0.16);   /* the accent the app already uses */
+  color: rgba(255, 255, 255, 0.95);
+}
+.tabbar-btn:focus-visible {
+  outline: 2px solid rgba(10, 132, 255, 0.9);
+  outline-offset: 2px;
+}
+
+/* --------------------------------- panes ----------------------------------
+   Every pane runs the full height of the screen. It used to reserve 84px at the
+   bottom for the tab pill, which turned the pill into a plinth: a solid band
+   content could not pass under, so it stopped short instead of scrolling
+   through. That band was the "block" — it cost the guide a chunk of its page
+   and gave the editor a strip of dead ground it could not use.
+
+   Nothing is reserved now. Content scrolls beneath the pill, which is what
+   gives the blur something to blur, and each vendored file keeps its own
+   bottom clearance so the last control still comes clear at the end of a
+   scroll. Safe-area insets do not cross into an iframe, so they land here.
+-------------------------------------------------------------------------- */
+.pane {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: transparent;
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top, 0px)
+           env(safe-area-inset-right, 0px)
+           env(safe-area-inset-bottom, 0px)
+           env(safe-area-inset-left, 0px);
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   The two surfaces do NOT overlap in time. That is the whole point of these
+   numbers, so keep them in step with LEAVE_MS in App.jsx.
+
+   This used to be a plain crossfade: the incoming pane faded up over 220ms
+   while the outgoing one stayed fully painted underneath for 240ms. Both
+   surfaces are dark with light type, so for most of that window you could read
+   *both* — the calculator's labels crossing the dial's, doubled and offset. It
+   read as the app struggling to keep up rather than as a transition.
+
+   An opaque ground on the incoming pane does not fix it. A surface at 50%
+   opacity shows half of whatever is behind it whatever colour it is painted,
+   so a dissolve between two legible screens always ghosts. The only fix is to
+   stop them being on screen together: the outgoing surface leaves over 140ms,
+   the incoming one starts at 110ms. The 30ms overlap is both of them under
+   20% — you cannot read either, so there is nothing to double.
+
+   Nothing flashes in the gap because every surface sits on the same ground.
+   The screen never goes anywhere; only what is on it changes.
+--------------------------------------------------------------------------- */
+:root {
+  --pane-out: 0.14s;
+  --pane-in: 0.2s;
+  --pane-in-delay: 0.11s;
+  --pane-ease: cubic-bezier(.22, .7, .3, 1);
+}
+
+/* An animation, not a transition. A pane that has just been inserted has no
+   previous opacity to transition from, so a transition silently does nothing
+   and the pane snaps in at full opacity. Animations run on insertion.
+
+   The 5px rise is small on purpose: enough that the surface reads as arriving
+   rather than materialising, not so much that the whole page appears to slide. */
+.pane-on {
+  z-index: 101;
+  animation: paneIn var(--pane-in) var(--pane-ease) var(--pane-in-delay) both;
+}
+/* Opacity ONLY. There used to be a 5px rise in here, and it cost more than it
+   was worth: the pane is an ancestor of .sess-block, which carries a
+   backdrop-filter, and a moving ancestor makes WebKit re-resolve that card's
+   backdrop every frame of the movement. Re-resolving a backdrop while the
+   layer underneath it is a canvas being promoted is how the card samples the
+   field un-attenuated and the dots read as sitting on top of it.
+
+   One property, no geometry, nothing for the backdrop to be re-resolved
+   against. The rise was three frames of travel nobody could describe; the dots
+   coming to the front is the thing you actually see. */
+@keyframes paneIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Leaving. An animation again, and for a less obvious reason than arriving:
+   removing .pane-on cancels an animation that was holding opacity at 1 through
+   its fill, and a transition to .pane-hidden's opacity:0 in that same style
+   change does not fire in Chromium — measured, not assumed. The pane cut out
+   instantly however the transition was declared. A keyframe is deterministic.
+
+   visibility only flips in the last 1%, so the pane stays composited for the
+   whole fade and then stops painting. Putting it in the `to` frame alone would
+   snap it mid-way, since discrete properties do not interpolate. */
+.pane-off {
+  pointer-events: none;
+  animation: paneOut var(--pane-out) var(--pane-ease) both;
+}
+@keyframes paneOut {
+  from { opacity: 1; visibility: visible; }
+  99%  { visibility: visible; }
+  to   { opacity: 0; visibility: hidden; }
+}
+
+/* Never display:none — that reloads the iframe in some WebKit versions and
+   would throw away the user's loaded screenshot. This is the resting state for
+   a pane that has been preloaded but never opened: hidden with no animation at
+   all, so it cannot flash into view on the way to being hidden. */
+.pane-hidden {
+  visibility: hidden;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.pane-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  overscroll-behavior: contain;
+}
+
+/* The calculator is not a pane — it is the document itself, shown and hidden
+   with display — so it needs its own half of the handover on the same clock.
+   Without this it cut in and out while everything around it faded, which is
+   what made it the surface you caught ghosting behind the others. */
+.wrap-in  { animation: paneIn var(--pane-in) var(--pane-ease) var(--pane-in-delay) both; }
+.wrap-out { animation: paneOut var(--pane-out) var(--pane-ease) both; pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tabbar-dock, .pane, .tabbar-btn { transition: none; }
+  .pane-on, .wrap-in { animation: none; }
+  /* still needs to end up hidden, just without the fade */
+  .pane-off { animation: none; visibility: hidden; opacity: 0; }
+  .wrap-out { animation: none; opacity: 0; }
+}
+
+/* ============================== sessions ==================================
+   The dial tab. It rides the .pane machinery above, so it crossfades like the
+   editor and the guide rather than cutting, and it scrolls inside itself
+   instead of moving the document — which leaves the calculator's scroll
+   position alone while this is up.
+
+   Class names are all sess-* on purpose: Calculator.jsx renders its stylesheet
+   inline, after this file, so anything it also names would win the tie. Only
+   .glass is shared, deliberately, because both surfaces want the same card. */
+.sess-scroll {
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+.sess-wrap {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-inline: auto;
+  width: 100%;
+  max-width: 560px;              /* the calculator's column, matched */
+  padding: calc(34px + env(safe-area-inset-top, 0px)) 18px
+           calc(24px + var(--tabbar-reserve, 0px));
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  color: #fff;
+}
+
+/* the eyebrow, borrowed from the field guide: a label then a rule that runs to
+   the edge on flex:1, with nothing to measure */
+.sess-head {
+  width: 100%;
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 20px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.34);
+}
+.sess-head b { color: rgba(255, 255, 255, 0.82); font-weight: 700; }
+.sess-head i { flex: 1; height: 1px; background: rgba(255, 255, 255, 0.09); }
+
+/* overflow:hidden because the marker is a rotated 300px box now. Nothing it
+   draws ever leaves the dial — the dot stays at radius 104 — but a rotated
+   element's BOUNDING BOX does: at 157 degrees a 300px square measures 424
+   across, and an absolutely positioned descendant contributes that to its
+   ancestor's scrollable area. It put 44px of horizontal scroll on a 320px
+   phone. The SVG used to clip this for free. */
+.sess-dial-wrap {
+  position: relative;
+  width: 300px; height: 300px;
+  margin-bottom: 22px;
+  overflow: hidden;
+}
+.sess-dial { width: 300px; height: 300px; display: block; }
+/* The readout has to live inside the INNER ring, not merely inside the dial —
+   its box is inset:0 over the whole 300px square, so nothing about the layout
+   stops it running under the arcs. The inner ring is r=85 with a 7px stroke, so
+   the band starts at 81.5, and a line sitting dy from the centre may only be
+   2 * sqrt(81.5^2 - dy^2) wide. The padding holds the wrapping lines inside
+   that; the clock is nowrap and is sized to fit instead.
+
+   Height is the other half of it, and the less obvious one. The clock is the
+   widest line, so it is the line least able to afford being pushed away from
+   the centre — and every extra line in the stack does exactly that. The stack
+   is four lines deep whenever a sub-window is running, which is what set these
+   numbers: 42px put 27 pixels of the clock on the track in the three-line case
+   alone, and 39px still failed the four-line one. 36px with the rhythm below
+   clears every state, measured on rendered pixels rather than on boxes. */
+.sess-centre {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 2px;
+  padding: 0 72px;                      /* a backstop; every line is nowrap */
+  box-sizing: border-box;
+  pointer-events: none;                 /* the dial underneath stays selectable */
+}
+.sess-clock {
+  font-size: 36px; font-weight: 700; letter-spacing: -0.03em; line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;                  /* "11:25 PM" must never wrap to two lines */
+}
+.sess-clock.sess-shut { font-size: 29px; color: rgba(255, 255, 255, 0.55); letter-spacing: 0; }
+.sess-clock small { font-size: 14px; font-weight: 600; opacity: 0.5; margin-left: 4px; }
+/* Every line in the readout is nowrap. Not for looks: a line that wraps gets
+   both wider (it fills the padding box) and taller (it pushes the lines above
+   and below further from the centre, where the ring closes in), so wrapping is
+   the one failure that compounds. The silver-bullet line used to wrap and drop
+   an orphaned "00S" straight onto the arcs. Nowrap makes any future overflow
+   show up as ink outside the ring, which the pixel test catches. */
+.sess-state {
+  margin-top: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px; font-weight: 800;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  white-space: nowrap;
+}
+.sess-state.sess-none { color: rgba(255, 255, 255, 0.42); }
+.sess-sublabel {
+  margin-top: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: #0a84ff;
+  white-space: nowrap;
+}
+.sess-left {
+  font-size: 12.5px; font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* The weekend countdown on its own line. Larger than .sess-left because it is
+   now the only number on a shut dial and has the width to spend — "19h 51m" is
+   half the string that used to sit here. */
+.sess-left-big {
+  font-size: 15px; font-weight: 700;
+  color: rgba(255, 255, 255, 0.72);
+  letter-spacing: -0.01em;
+}
+/* The caption under it. Same mono-caps voice as .sess-state so the shut dial
+   reads as one stack rather than three unrelated type sizes, but dimmer and
+   tighter — it is the fixed half of the pair, and the countdown above is the
+   half that moves. */
+.sess-when {
+  margin-top: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px; font-weight: 700;
+  letter-spacing: 0.11em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.38);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   The Today card's tilt. See useTilt.js for the behaviour; this is only the
+   projection and the two speeds.
+
+   PERSPECTIVE LIVES ON THE WRAPPER. On the card itself it would make the card
+   its own vanishing point and the tilt would flatten into a skew — depth comes
+   from the projection belonging to the thing the card sits in. 900px is close
+   enough to read as real and far enough that the far edge does not stretch.
+
+   NO BOX-SHADOW, at rest or lifted. The card is .glass, and .glass carries no
+   shadow anywhere in this app — glassshell asserts it against the guide's card.
+   A drop shadow would not do anything on this ground anyway: black under a dark
+   card on #121212 is invisible. The raised cue is the hairline coming up
+   instead, which is the language the rest of the app already speaks.
+
+   TWO SPEEDS, and the slow one is the point. Following the pointer wants to be
+   nearly immediate or the card lags your hand; letting go wants to be long and
+   soft, so the card settles rather than snapping flat. Same transition
+   property, swapped by a class the hook adds while the gesture is live. */
+.sess-tilt { width: 100%; perspective: 900px; }
+.sess-tilt .sess-block {
+  transform-style: preserve-3d;
+  transition: transform 620ms cubic-bezier(.16, 1, .3, 1),
+              border-color 380ms ease;
+}
+/* Two classes deep, so it outranks the rule above without !important. */
+.sess-tilt .sess-block-live {
+  transition: transform 110ms cubic-bezier(.33, 1, .68, 1),
+              border-color 380ms ease;
+  border-color: rgba(176, 176, 176, 0.2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sess-tilt { perspective: none; }
+  .sess-tilt .sess-block { transition: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   The price card.
+
+   Same .glass as the table above it, so it reads as the next card in a stack
+   rather than a widget bolted on. No tilt: the tilt is what marks the Today
+   card as this tab's centrepiece, and giving it to everything spends it.
+
+   EVERY NUMBER IS TABULAR AND EVERY SLOT HAS A FLOOR. A price is the one piece
+   of text on this screen that changes several times a second, and proportional
+   digits change width as they change value — the row would twitch continuously,
+   which is the same fault that made the dial's readout collide with its own
+   sub-label. min-width on the slots stops 9,999 -> 10,000 from moving anything
+   beside it, and the card's height never depends on whether data has arrived. */
+.sess-feed {
+  width: 100%;
+  padding: 12px 16px 13px;
+  margin-bottom: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.sess-feed-top { display: flex; align-items: center; gap: 8px; }
+.sess-feed-top i { flex: 1; height: 1px; background: rgba(255, 255, 255, 0.09); }
+.sess-feed-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex: none;
+  background: rgba(255, 255, 255, 0.22);
+  transition: background 0.5s ease, box-shadow 0.5s ease;
+}
+.sess-feed-dot.on {
+  background: #4ade80;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.13);
+}
+.sess-feed-dot.stale { background: #e8ab42; box-shadow: 0 0 0 3px rgba(232, 171, 66, 0.13); }
+.sess-feed-state {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px; font-weight: 800;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+}
+.sess-feed-chips { display: flex; gap: 5px; flex: none; }
+.sess-feed-chip {
+  height: 24px; padding: 0 10px; border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.62);
+  font: 700 10.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em; cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+/* The app's selected-control language, the same #E9EDF4 the deck and the
+   editor use — light on dark, never a coloured fill. */
+.sess-feed-chip.on {
+  background: #e9edf4; border-color: #e9edf4; color: #121212;
+}
+
+.sess-feed-price {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin: 11px 0 12px;
+}
+.sess-feed-price b {
+  font-size: 27px; font-weight: 700; letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, 0.92);
+  transition: color 0.4s ease;
+}
+.sess-feed-price b.dim { color: rgba(255, 255, 255, 0.42); }
+.sess-feed-chg {
+  font-size: 13px; font-weight: 600;
+  color: rgba(255, 255, 255, 0.34);
+  min-width: 68px; text-align: right;   /* so the sign appearing moves nothing */
+}
+.sess-feed-chg.up { color: #4ade80; }
+.sess-feed-chg.down { color: #f2857f; }
+
+/* Always present, always this tall — a bar that appears with the first tick
+   would change the card's height and jog the Today card sitting above it. */
+.sess-feed-bar { position: relative; height: 3px; margin-bottom: 9px; }
+.sess-feed-bar i {
+  position: absolute; inset: 0;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.sess-feed-mark {
+  position: absolute; top: 50%; width: 2px; height: 11px;
+  border-radius: 1px; background: rgba(255, 255, 255, 0.85);
+  transform: translate(-50%, -50%);
+  transition: left 0.32s cubic-bezier(.22, .7, .3, 1);
+}
+@media (prefers-reduced-motion: reduce) { .sess-feed-mark { transition: none; } }
+
+.sess-feed-foot {
+  display: flex; align-items: baseline; gap: 10px;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.34);
+}
+.sess-feed-foot span { min-width: 62px; }
+.sess-feed-foot span:last-child { text-align: right; }
+.sess-feed-foot em {
+  flex: 1; text-align: center; font-style: normal;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.26);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.sess-block { width: 100%; padding: 14px 16px 6px; margin-bottom: 12px; }
+.sess-blabel {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px; font-weight: 800;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.3);
+  margin-bottom: 4px;
+}
+.sess-row {
+  display: flex; align-items: center; gap: 11px;
+  padding: 9px 0;
+  border-top: 0.4px solid rgba(176, 176, 176, 0.1);
+  font-size: 13.5px;
+}
+.sess-block .sess-row:first-of-type { border-top: 0; }
+/* One line, always. A wrapped name ("London / Killzone") makes its row taller
+   than its neighbours and the column of times stops lining up, which is most of
+   what the list is for. Ellipsis rather than shrink-to-fit so the times keep
+   their column; the media query below is what stops it ever being needed. */
+.sess-nm {
+  flex: 1; min-width: 0;
+  font-weight: 600; color: rgba(255, 255, 255, 0.9);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sess-at {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; color: rgba(255, 255, 255, 0.34);
+  font-variant-numeric: tabular-nums;
+}
+.sess-st {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; font-weight: 700;
+  min-width: 62px; text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.42);
+}
+/* ---------------------------------------------------------------------------
+   A window opening or closing is a STATE CHANGE, not an event, and it used to
+   land in a single frame: the arc flipped colour, the halo appeared, the bullet
+   lit, the row's text went from grey to white and its countdown from grey to
+   green — all at once, on a second boundary nobody was watching for. It read as
+   a glitch rather than as something happening.
+
+   Everything that differs between states now crosses over. 0.7s is long enough
+   to read as a change of state and short enough that it has finished before you
+   have looked twice; the arcs are slower still, because they are the largest
+   area and the fastest to look abrupt.
+--------------------------------------------------------------------------- */
+.sess-arc { transition: stroke 0.9s ease, opacity 0.9s ease; }
+.sess-nm, .sess-st, .sess-at,
+.sess-state, .sess-left, .sess-sublabel, .sess-when { transition: color 0.7s ease; }
+
+.sess-bul {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: rgba(255, 255, 255, 0.16);
+  transition: background 0.7s ease, box-shadow 0.7s ease;
+}
+.sess-bul.on   { background: #4ADE80; box-shadow: 0 0 10px rgba(74, 222, 128, 0.85); }
+.sess-bul.next { background: #0a84ff; box-shadow: 0 0 10px rgba(10, 132, 255, 0.7); }
+.sess-bul.done { background: rgba(255, 255, 255, 0.10); }
+/* box-shadow cannot interpolate between different layer counts, so the resting
+   state declares the same layer at zero spread rather than `none`. Without it
+   the glow appears instantly however long the transition is. */
+.sess-bul { box-shadow: 0 0 0 rgba(74, 222, 128, 0); }
+.sess-row.open .sess-nm { color: #fff; }
+.sess-row.open .sess-st { color: #4ADE80; }
+.sess-row.next .sess-st { color: #0a84ff; }
+.sess-row.done .sess-nm { color: rgba(255, 255, 255, 0.4); }
+
+/* A window that sits INSIDE a session is nested under it — the silver bullet is
+   an hour within the NY killzone, and a flat list would have implied the two
+   were peers. The elbow draws that rather than leaving it to the indent. */
+.sess-sub { padding-left: 16px; }
+.sess-sub .sess-nm { font-size: 12.5px; font-weight: 500; color: rgba(255, 255, 255, 0.62); }
+.sess-sub .sess-bul { width: 5px; height: 5px; }
+.sess-tee {
+  width: 9px; height: 9px; margin-right: -4px; flex: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  border-bottom-left-radius: 3px;
+  transform: translateY(-4px);
+}
+
+/* Small phones. The row is bullet + name + time + state, and only the name is
+   flexible, so on a 320px screen it was the one thing that got squeezed —
+   "London Killzone" ran out of room and ellipsised. Everything else here gives
+   the name back the width it needs; nothing changes above this breakpoint.
+
+   The dial is deliberately NOT scaled. Its readout is HTML positioned over an
+   SVG, so shrinking the ring without shrinking the type would walk the text
+   straight back onto the arcs — the exact collision the sizes above were set to
+   avoid. 300px still clears a 320px viewport. */
+@media (max-width: 380px) {
+  .sess-wrap { padding-left: 12px; padding-right: 12px; }
+  .sess-block { padding-left: 12px; padding-right: 12px; }
+  .sess-row { gap: 7px; font-size: 13px; }
+  .sess-at { font-size: 10px; }
+  .sess-st { min-width: 56px; }
+  /* The nested row is the tightest on the page and it is not obvious why: it
+     pays for the elbow and the indent, its time reads "10:00 AM" rather than
+     "2:00 AM", and when the silver bullet is the window actually running its
+     status is "30m 00s left" instead of "done". All four land on the same row,
+     and only the name can give — so it was the one thing that truncated, and
+     only during the hour it matters most. */
+  .sess-sub { padding-left: 4px; }
+}
+
+/* ========================= the dial, in motion ============================
+   Two kinds of animation live here and they answer different questions.
+
+   The ENTRANCE runs once each time you open the tab. Sessions is mounted for
+   the life of the app so its clock survives switching away, which means mount
+   is not the moment anyone sees it — Sessions.jsx keys the dial on a run
+   counter instead, and remounting restarts everything below.
+
+   The PULSE never stops. It exists because this screen can be completely
+   correct and completely still: at 3am nothing is open, every countdown is
+   hours away, and a static dial gives you no way to tell a live clock from a
+   screenshot. A beat on the marker is the difference.
+
+   Nothing here moves the geometry the readout was measured against. The dial
+   and the readout scale together, so the clearance between the type and the
+   inner ring holds through the whole entrance.
+========================================================================== */
+
+/* The arcs draw themselves on, which needs an animatable length — and a custom
+   property is only animatable once it has been registered with a type.
+
+   Where @property is missing the arc jumps to full length at the midpoint of
+   the animation instead of growing, because unregistered custom properties
+   interpolate discretely. That is a weaker entrance, not a broken dial: the
+   final state is identical either way and the fade still runs. */
+@property --arc-len {
+  syntax: "<length>";
+  /* Inherited on purpose: it is set on the arc's GROUP, and a glowing arc is
+     three strokes inside that group which all need the same dash length. One
+     animation on the group drives all of them. */
+  inherits: true;
+  initial-value: 0px;
+}
+
+/* The gap is any number past the circumference; the visible dash is the
+   window's share of the day and --arc-len carries it. In the stylesheet rather
+   than as an attribute because a presentation attribute loses to a stylesheet,
+   so the two would fight — and every arc, tracks included, sets its own length
+   inline, so nothing here ever falls back to the 0px initial value. */
+.sess-arc { stroke-dasharray: var(--arc-len) 9999; }
+
+/* Opacity only. This used to scale from 0.965, and that one property was the
+   single most expensive thing in the entrance: scaling an <svg> re-rasterises
+   its contents every frame, and at 6x CPU throttle it accounted for half the
+   dropped frames on its own. will-change did not rescue it — a promoted layer
+   still re-rasters SVG content as the scale changes.
+
+   Nothing is really lost. 3.5% of scale was the least visible part of the
+   entrance; the arcs drawing themselves on, the readout rising and the marker
+   sweeping round are what make it read as powering up, and all three are
+   still here. An opacity animation Chromium composites on its own. */
+.sess-dial, .sess-centre { animation: dialIn 0.44s ease both; }
+@keyframes dialIn { from { opacity: 0; } to { opacity: 1; } }
+
+.sess-tracks { animation: sessFade 0.4s ease 0.04s both; }
+.sess-ticks  { animation: sessFade 0.34s ease 0.1s both; }
+.sess-hours  { animation: sessFade 0.34s ease 0.18s both; }
+.sess-marks  { animation: sessFade 0.34s ease 0.3s both; }
+@keyframes sessFade { from { opacity: 0; } to { opacity: 1; } }
+
+/* --i is the window's place in the DAY, not its place in the array, so the
+   ring fills in the order the day runs rather than in source order. */
+.sess-arc-g:not(.sess-track-g) {
+  animation: arcDraw 0.5s cubic-bezier(.3, .8, .35, 1)
+             calc(0.08s + var(--i, 0) * 0.085s) both;
+}
+@keyframes arcDraw {
+  from { --arc-len: 0px; opacity: 0.25; }
+  to   { opacity: 1; }
+}
+
+/* A slow breath on whatever is open. Two animations on one element: the draw
+   runs once and the breath repeats, and because the breath is listed second it
+   owns opacity from the moment its delay elapses. Needs .sess-arc as well to
+   out-specify the rule above, which is why this reads heavier than it is. */
+.sess-arc-g.sess-arc-live {
+  animation:
+    arcDraw 0.5s cubic-bezier(.3, .8, .35, 1) calc(0.08s + var(--i, 0) * 0.085s) both,
+    sessBreath 3.4s ease-in-out 0.9s infinite;
+}
+/* the same breath, same rate, on its bullet in the list — the two halves of
+   the screen should read as one thing rather than two that happen to agree */
+.sess-bul.on { animation: sessBreath 3.4s ease-in-out 0.9s infinite; }
+@keyframes sessBreath {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.72; }
+}
+
+/* The readout arrives last and rises rather than appearing, so the clock reads
+   as settling into the ring the arcs have just drawn. */
+.sess-centre > * { animation: sessRise 0.42s cubic-bezier(.22, .9, .28, 1) both; }
+.sess-centre > :nth-child(1) { animation-delay: 0.2s; }
+.sess-centre > :nth-child(2) { animation-delay: 0.27s; }
+.sess-centre > :nth-child(3) { animation-delay: 0.32s; }
+.sess-centre > :nth-child(4) { animation-delay: 0.37s; }
+@keyframes sessRise {
+  from { opacity: 0; transform: translateY(7px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Now. Parked at midnight in the markup and rotated into place, so opening the
+   tab sweeps it round the day to where you actually are — the one animation
+   that says what this screen is for. Afterwards the same transition carries
+   the per-second creep, which is 0.0042 degrees: far too small to see either
+   way, but it costs nothing and means the marker never steps.
+
+   Sessions.jsx suppresses the transition for the one frame it needs to park
+   the marker, and keeps the angle monotonic so midnight does not wind it
+   backwards through the whole day. */
+/* An HTML layer over the dial, not a group inside it. transform-box and a
+   150px origin are gone with the SVG — this is a 300x300 box, so the default
+   50% 50% origin already IS the dial centre.
+
+   will-change is the reason any of this was moved: it promotes the marker to
+   its own compositor layer, so the rotation is a GPU transform of a texture
+   rather than a repaint of the whole dial. An SVG transform is never
+   composited, which is why the sweep used to stall partway round while the
+   arcs were drawing themselves on over the same main thread. */
+.sess-now {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+/* Offsets are the viewBox numbers unchanged: 150 - (R_OUT - 10) = 56 down to
+   150 - (R_IN - 13) = 78, and the dot centred on 150 - R_OUT = 46. */
+.sess-now-stem {
+  position: absolute; left: 50%; top: 56px;
+  width: 1.4px; height: 22px; margin-left: -0.7px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.45);
+}
+.sess-now-dot, .sess-now-beat {
+  position: absolute; left: 50%; top: 46px;
+  width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px;
+  border-radius: 50%;
+  background: #fff;
+}
+/* r=7.6 at .22 and r=11 at .12 off a 5.5 core, as spreads: 2.1 and 5.5. */
+.sess-now-dot {
+  box-shadow: 0 0 0 2.1px rgba(255, 255, 255, 0.22),
+              0 0 0 5.5px rgba(255, 255, 255, 0.12);
+}
+.sess-now-beat {
+  opacity: 0.5;
+  animation: sessBeat 1s cubic-bezier(.2, .6, .3, 1) infinite;
+}
+/* Parked at midnight for one frame, with nothing to interpolate from. */
+.sess-now-park { transition: none; }
+/* The sweep. The old curve was cubic-bezier(.22,.85,.3,1), which put 10.7
+   degrees into the FIRST FRAME and then spent the remaining second creeping —
+   measured, and it is most of why the marker looked wrong. This one eases in
+   and out, so it leaves midnight the way a hand would and settles into place
+   instead of stalling on the approach. Keep the duration in step with
+   SWEEP_MS in Sessions.jsx. */
+.sess-now-sweep { transition: transform 1.15s cubic-bezier(.5, 0, .2, 1); }
+/* Following the clock. Linear and exactly one second, which is the tick
+   period, so consecutive updates chain into one continuous creep rather than
+   easing to a stop sixty times a minute. */
+.sess-now-live { transition: transform 1s linear; }
+
+/* The beat: a second dot under the real one, expanding and fading once a
+   second. No filter on this one, unlike the dot it sits beneath — it runs
+   forever, and a Gaussian blur re-rasterising every frame is not free. */
+@keyframes sessBeat {
+  from    { opacity: 0.5; transform: scale(1); }
+  70%     { opacity: 0;   transform: scale(2.4); }
+  to      { opacity: 0;   transform: scale(2.4); }
+}
+
+/* Every arc still carries its full length inline, so switching all of this off
+   leaves a finished dial rather than an empty ring. */
+@media (prefers-reduced-motion: reduce) {
+  .sess-dial, .sess-centre, .sess-centre > *,
+  .sess-tracks, .sess-ticks, .sess-hours, .sess-marks,
+  .sess-arc-g, .sess-arc-g.sess-arc-live, .sess-bul.on { animation: none; }
+  .sess-arc, .sess-nm, .sess-st, .sess-at, .sess-bul,
+  .sess-state, .sess-left, .sess-sublabel { transition: none; }
+  .sess-now-sweep, .sess-now-live { transition: none; }
+  .sess-now-beat { display: none; }
+  .sess-now { transition: none; }
+}
+
+/* The drifting field behind the dial. Outside .sess-scroll, so it holds still
+   while the list scrolls over it — a background that scrolls is a texture, and
+   this is meant to read as depth behind the screen rather than part of it.
+
+   It fades with the tab rather than appearing with it. The canvas is already
+   painting before the pane is visible (Particles.jsx seeds and draws once on
+   mount), so without this the field would be at full strength on the first
+   frame while everything above it was still arriving. */
+/* No opacity of its own. It used to fade in over 0.55s with a 0.1s delay, on
+   the reasoning that the canvas is already painting before the pane is visible
+   — but the PANE's fade already covers that, and every other thing on this
+   screen arrives on it. A second, slower ramp on top meant the field was still
+   climbing to full strength half a second after the dial had settled, arriving
+   as its own separate event. It rides the pane now, like everything else. */
+/* THE CANVAS NEVER ANIMATES. That is the fix, and it took three attempts to
+   get to because each earlier one animated it differently instead.
+
+   A canvas is its own compositing layer. Every version that faded it — whether
+   by inheriting the pane's animating opacity, or with a transition of its own —
+   put a layer whose opacity is changing over a layer whose opacity is also
+   changing, and Safari composited the canvas at full strength before the fade
+   reached it. Full-strength dots over a half-faded dial, for a frame or two.
+   That is what "they flash and go back to normal" is, and it survived being
+   moved, retimed and given its own transition, because all three still animated
+   it.
+
+   NOT position:fixed, AND NOT AT THE ROOT. Both of those took several rounds to
+   stop being true, and together they were the reason the dots kept arriving in
+   front of the session table for a frame.
+
+   As a fixed, root-level canvas this was a separate compositing layer sitting
+   beside .pane, which is also fixed. Two fixed layers at the root are two
+   things a compositor orders at its own discretion, and iOS promotes and
+   reorders fixed layers more eagerly than anything else on a page. Every
+   z-index out there — -2, then 0 with everything else pushed positive — was a
+   REQUEST that the field stay behind the card. Being refused for one frame on
+   the way in is exactly what "they jump in front and go back" is.
+
+   It is absolute now, and it lives INSIDE the Sessions pane as its first child.
+   The field and .sess-scroll are siblings in the pane's own stacking context,
+   ordered 0 before 1, and painting order within a stacking context is not the
+   compositor's to reinterpret. There is no arrangement of layers that puts it
+   in front. It also means nothing else has to arrange itself around it: the
+   calculator and the editor hide the field by being other panes, not by
+   covering a canvas that spans the whole app.
+
+   transform + will-change stay, so the layer still exists for the life of the
+   app rather than being built at the moment of a switch.
+
+   The drift still stops when the tab is not up — see Particles.jsx. This is
+   about paint, not about work. */
+.sess-particles {
+  position: absolute;
+  /* NOT inset:0, and NOT width:auto either.
+
+     An absolutely positioned child resolves its offsets against the containing
+     block's PADDING box, and .pane's padding is the safe-area insets — so
+     inset:0 in here would stop the field short of the screen edges by the notch
+     and the home indicator, leaving a bare band top and bottom on exactly the
+     phones this is built for. So each offset is backed out by its own inset.
+
+     The size has to be spelled out rather than left to the offsets, because a
+     canvas is a REPLACED element: for those, width:auto resolves to the
+     intrinsic size — the canvas element's default 300x150 — instead of
+     stretching between left and right the way it would for a block. Left as
+     auto the field collapsed into a small rectangle in one corner and the card
+     had nothing behind it at all. */
+  top: calc(-1 * env(safe-area-inset-top, 0px));
+  left: calc(-1 * env(safe-area-inset-left, 0px));
+  width: calc(100% + env(safe-area-inset-left, 0px) + env(safe-area-inset-right, 0px));
+  height: calc(100% + env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px));
+  display: block;
+  z-index: 0;
+  pointer-events: none;
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+
+
+/* Above the field. .sess-scroll had no stacking position of its own, so the
+   canvas would have painted over the dial rather than behind it. */
+.sess-scroll { position: relative; z-index: 1; }
+
+
+
+/* Their own convention — titles carrying "BREAKING" or "URGENT". Worth a
+   louder weight and the app's warm note, and nothing more: on a wire where a
+   tenth of the traffic is flagged, a coloured row would just become the
+   normal-looking row. */
+.sess-news-item.is-breaking .sess-news-text { color: rgba(255, 255, 255, 0.95); font-weight: 600; }
+.sess-news-item.is-breaking .sess-news-when { color: #e8ab42; }

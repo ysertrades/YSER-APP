@@ -1,0 +1,1791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Trades card editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Loaded non-blockingly. A parser-inserted <script> waits on any pending
+     stylesheet, so fetching this the normal way puts a third-party CDN on the
+     critical path: the editor stays inert until Google answers. Measured at 13s
+     on a slow link, and it would hang outright behind a CSP that blocks the
+     host. media="print" keeps it out of the way, then it flips to all on load.
+     Nothing else needs to change — draw() already re-runs on document.fonts.ready,
+     so the canvas repaints itself the moment the real faces arrive. -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet"></noscript>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+
+/* ═══════════════════════ THEME ═══════════════════════
+   The editor is dark, and exactly one thing in it is not: the stage.
+
+   That is the whole idea rather than a detail. This page has two jobs that want
+   opposite treatments — it is a TOOL, which belongs in the same dark room as
+   the rest of the app, and it is a VIEWER for a card that is light. Painting
+   the chrome light so it would not clash with the card had it backwards: it
+   made the tool compete with the thing being made. Dark chrome does the
+   opposite. The card becomes the only lit surface on the page and the eye goes
+   straight to it, which is what you are actually looking at.
+
+   Nothing here touches what gets EXPORTED. The card's own background is a
+   control on the right — #F5F5F5 by default, yours to change — and it is drawn
+   into the canvas, not styled by any of this. --paper below is the frame the
+   canvas sits in, not the card.
+
+   The values are the app's, not new ones. Ground, glass, hairline, chip fills
+   and the amber all come straight from the calculator and the field guide, so
+   the three surfaces read as one program rather than three that happen to be
+   dark. */
+:root{
+  --ground:#121212;              /* the app's ground, on every tab */
+
+  /* Four steps, and the bottom two are NOT the light theme's greys inverted.
+     #a8a8a8 on white is a footnote at about 2.6:1 and reads as quiet; the same
+     distance below this ground lands at 2.6:1 as well and reads as broken —
+     dark themes lose faint type much faster than light ones, because the eye is
+     adapted to the bright surfaces around it. Measured over the panel's real
+     composited fill rather than over the token: labels 5.0:1, notes 3.6:1. */
+  --ink:rgba(255,255,255,.92);   /* values you typed, and headings */
+  --ink-2:rgba(255,255,255,.62); /* supporting text */
+  --ink-3:rgba(255,255,255,.48); /* section labels */
+  --ink-4:rgba(255,255,255,.38); /* hints and footnotes */
+
+  --card:rgba(0,0,0,.2);         /* the app's .glass, to the value */
+  --card-bd:rgba(176,176,176,.1);
+  --line:rgba(255,255,255,.09);  /* the rule between sections */
+
+  --ctrl:rgba(255,255,255,.055); /* a control at rest */
+  --ctrl-bd:rgba(255,255,255,.12);
+  --ctrl-ink:rgba(255,255,255,.78);
+  --ctrl-hit:rgba(255,255,255,.10);
+
+  --on:#E9EDF4;                  /* a control that is selected: light on dark,
+                                    the inverse of the light theme's black pill */
+  --on-ink:#121212;
+
+  --signal:#E9B44C;              /* the app's one warm note, kept for the one
+                                    button that makes a file */
+  --signal-hit:#DCA63F;
+
+  --bad:#F2857F;                 /* errors, lifted off the light theme's #B3261E
+                                    which is unreadable on this ground */
+  --bad-bg:rgba(242,133,127,.10);
+  --bad-bd:rgba(242,133,127,.32);
+
+  --paper:#ffffff;               /* the stage, and nothing else */
+}
+
+body{min-height:100vh;width:100%;overflow-x:hidden;background:var(--ground);color:var(--ink);
+  /* Tells the engine to render form controls, focus rings, the colour picker's
+     popover and the panel's scrollbar dark. Without it the native parts stay
+     light and the page looks half-converted. */
+  color-scheme:dark;
+  font-family:Poppins,-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1400px;margin:0 auto;padding:14px}
+.head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px;margin-bottom:14px}
+h1{margin:0;font-size:17px;font-weight:600;letter-spacing:-.01em}
+.sub{margin:2px 0 0;font-size:12.5px;color:var(--ink-2);max-width:44ch}
+.acts{display:flex;gap:8px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 14px;border-radius:10px;
+  border:1px solid var(--ctrl-bd);background:var(--ctrl);color:var(--ctrl-ink);font:500 13px/1 Poppins,sans-serif;cursor:pointer;white-space:nowrap}
+.btn:active{background:var(--ctrl-hit)}
+/* The one button that produces a file gets the app's amber, the same note the
+   guide's Back button carries. In the light theme this was a black pill, which
+   on this ground would have been a hole. */
+.btn.go{background:var(--signal);border-color:var(--signal);color:var(--on-ink);font-weight:600}
+.btn.go:active{background:var(--signal-hit);border-color:var(--signal-hit)}
+.btn:disabled{opacity:.35;cursor:default}
+.grid{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;align-items:start}
+/* THE ONE LIGHT SURFACE. The stage is a viewer, not chrome — the card inside it
+   is light and this is its frame, so it stays paper. On a dark page it stops
+   being one panel among several and becomes the only lit thing on screen, which
+   is the point. The border is a hairline of light rather than the light theme's
+   grey: against #121212 a grey edge reads as grime. */
+.stage{position:relative;width:100%;margin:0 auto;border-radius:12px;overflow:hidden;
+  background:var(--paper);border:1px solid rgba(255,255,255,.10)}
+canvas{display:block;width:100%;height:auto;touch-action:none}
+.drop{position:absolute;inset:0;display:grid;place-items:center;padding:18px;text-align:center;pointer-events:none}
+/* Deliberately unchanged. This sits ON the stage, so it is dark-on-paper like
+   everything else in there — the one place in the file where light-theme greys
+   are still the right answer. */
+.drop p{margin:0;font-size:13.5px;font-weight:500;color:#767676}
+.drop small{display:block;margin-top:3px;font-size:12px;color:#a0a0a0;font-weight:400}
+.tip{margin:8px 2px 0;font-size:11.5px;line-height:1.5;color:var(--ink-4)}
+.err{margin-top:8px;padding:8px 10px;border-radius:9px;background:var(--bad-bg);border:1px solid var(--bad-bd);color:var(--bad);font-size:12.5px;display:none}
+/* The app's card, to the value — same fill, same blur, same hairline, same 20px
+   radius the Sessions table and the guide's slides carry. */
+.panel{background:var(--card);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
+  border:0.4px solid var(--card-bd);border-radius:20px;padding:14px;min-width:0}
+.sec{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}
+.sec:first-child{border-top:0;margin-top:0;padding-top:0}
+.sech{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:9px}
+.lab{margin:0;font-size:10px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3)}
+.hint{font-size:11px;color:var(--ink-4);font-variant-numeric:tabular-nums;white-space:nowrap}
+.cap{margin:0 0 6px;font-size:11px;color:var(--ink-4)}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{height:34px;padding:0 12px;border-radius:9px;border:1px solid var(--ctrl-bd);background:var(--ctrl);color:var(--ctrl-ink);
+  font:500 12.5px/1 Poppins,sans-serif;cursor:pointer;white-space:nowrap}
+.chip:active{background:var(--ctrl-hit)}
+/* A CHIP THAT SHOWS ITS OWN ANSWER.
+
+   It started with the rail-width switch, which was a pair of words and a
+   paragraph explaining what the words meant — the long way round for a choice
+   whose entire content is a SHAPE. It reads better as a picture, so every
+   control whose answer is a shape or a mark now carries one, and the picking
+   and the explaining are the same gesture.
+
+   NOT EVERY CONTROL. Timeframe chips say H4, and H4 is the icon; export sizes
+   already state their pixels and are all 16:9, so a proportional rectangle
+   would be four identical rectangles. A glyph that carries no information is
+   just noise wearing a uniform.
+
+   SVG glyphs draw in currentColor, so they invert with the selected chip for
+   free. Canvas glyphs cannot — they are handed the chip's resolved colour at
+   build time instead, which works because buildChips() reruns on every
+   change. Brand-coloured badges are exempt: an NQ badge is blue on both. */
+.chip-fig{display:inline-flex;align-items:center;gap:8px;padding-left:9px;height:38px}
+.chip-fig svg{display:block;flex:none;overflow:visible}
+.chip-fig svg.g-rail{width:36px;height:21px}
+.chip-fig svg.g-fit{width:24px;height:21px}
+.chip-fig svg.g-sess{width:26px;height:14px}
+.chip-fig canvas{display:block;width:21px;height:21px;flex:none}
+.chip-fig .fr{fill:none;stroke:currentColor;opacity:.34;stroke-width:1.4}
+.chip-fig .br{fill:currentColor;opacity:.92}
+.chip-fig .dim{fill:currentColor;opacity:.28}
+/* Selected is LIGHT on dark — the exact inverse of the light theme's black
+   pill, and the same #E9EDF4 the guide uses for the chip it is showing you. */
+.chip[data-on="1"]{background:var(--on);border-color:var(--on);color:var(--on-ink)}
+.mini{height:34px;min-width:34px;padding:0 8px;border-radius:9px;border:1px solid var(--ctrl-bd);background:var(--ctrl);color:var(--ink-2);
+  font:500 12px/1 Poppins,sans-serif;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap}
+.mini:active{background:var(--ctrl-hit)}
+.field{height:34px;width:100%;border-radius:9px;border:1px solid var(--ctrl-bd);background:var(--ctrl);padding:0 10px;
+  font:400 13px/1 Poppins,sans-serif;color:var(--ink)}
+.field:focus{outline:none;border-color:rgba(255,255,255,.34)}
+.num{height:34px;width:62px;border-radius:9px;border:1px solid var(--ctrl-bd);background:var(--ctrl);padding:0 8px;
+  font:400 12.5px/1 Poppins,sans-serif;color:var(--ink);font-variant-numeric:tabular-nums}
+.num:focus{outline:none;border-color:rgba(255,255,255,.34)}
+.edge{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;margin-bottom:2px}
+.edge>span{width:46px;font-size:12px;color:var(--ink-2);flex:none}
+/* The slider takes the room the four buttons used to. min-width:0 because a
+   flex item's automatic minimum is its content, and without it the track
+   refuses to shrink on a 320px screen and pushes the readout off the edge. */
+.edge .edge-slider{flex:1;min-width:0;width:auto}
+.edge .num{width:60px;flex:none;text-align:center}
+.note{margin:8px 0 0;font-size:11px;line-height:1.5;color:var(--ink-4)}
+.check{display:flex;align-items:center;gap:8px;margin-top:11px;font-size:12.5px;color:var(--ctrl-ink);cursor:pointer;user-select:none}
+.check input{width:16px;height:16px;accent-color:var(--signal)}
+/* Swatches share the chip's 34px height so the background row lines up with
+   every other control row in the panel. */
+.sw{width:34px;height:34px;padding:0;border-radius:9px;border:1px solid var(--ctrl-bd);cursor:pointer;
+  position:relative;flex:none;background-clip:padding-box}
+/* The inset ring has to be the GROUND, not white. It is a gap punched between
+   the swatch colour and its selection ring, so it reads as a gap only when it
+   matches the page behind it — white here would look like a second border on
+   every dark swatch. */
+.sw[data-on="1"]{border-color:var(--on);box-shadow:0 0 0 2px var(--ground) inset,0 0 0 1px var(--on)}
+/* A spectrum ring around the live colour, so the custom picker never reads as
+   an empty square the way a plain swatch does at pale values. */
+.pick{width:34px;height:34px;border-radius:9px;overflow:hidden;border:0;padding:2.5px;
+  display:inline-flex;flex:none;cursor:pointer;
+  background:conic-gradient(from .25turn,#f2b705,#e03131,#8b5cf6,#1f9bf0,#26a69a,#f2b705)}
+.pick input[type=color]{width:100%;height:100%;padding:0;border:0;background:none;cursor:pointer;border-radius:6.5px}
+.pick input[type=color]::-webkit-color-swatch-wrapper{padding:0}
+.pick input[type=color]::-webkit-color-swatch{border:none;border-radius:6.5px}
+.pick input[type=color]::-moz-color-swatch{border:none;border-radius:6.5px}
+.hexf{width:96px;flex:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;text-transform:uppercase}
+.hexf.bad{border-color:var(--bad-bd);background:var(--bad-bg);color:var(--bad)}
+.slider{position:relative;height:34px;display:flex;align-items:center;touch-action:none;cursor:pointer;user-select:none;width:100%}
+.slider[data-off="1"]{opacity:.4;cursor:default}
+/* The slider inverts wholesale: the track was the light value and the fill the
+   dark one, which on this ground would have drawn the EMPTY part of the slider
+   and left the filled part invisible. */
+.track{position:absolute;left:0;right:0;height:6px;border-radius:3px;background:rgba(255,255,255,.12)}
+.fill{position:absolute;left:0;height:6px;border-radius:3px;background:var(--on)}
+.thumb{position:absolute;width:20px;height:20px;border-radius:50%;background:var(--on);border:1px solid rgba(0,0,0,.35);box-shadow:0 1px 3px rgba(0,0,0,.45)}
+/* A 20px handle is a mouse target. On touch the whole control grows. */
+@media (pointer:coarse){
+  .slider{height:44px}
+  .track,.fill{height:7px;border-radius:4px}
+  .thumb{width:26px;height:26px}
+}
+/* Framed, a tab pill floats over the bottom of this page. It used to stand on a
+   band the host reserved, which content could not scroll through; now it hovers
+   and the page runs the full height under it. --pill-clear is what replaces
+   that band: scroll clearance at the foot of the page, so the last control
+   still comes out from under the pill at the end of a scroll, and nothing is
+   walled off on the way down. Only applied when framed — standalone there is
+   no pill. */
+body.embedded{--pill-clear:84px}
+body.embedded .wrap{padding:10px 10px calc(10px + var(--pill-clear))}
+body.embedded .sub{display:none}
+body.embedded h1{font-size:15px}
+body.embedded .head{margin-bottom:10px}
+@media (min-width:1024px){
+  body.embedded .stage{max-width:calc((100vh - 190px) * 1.7778)}
+  /* the sticky side panel is viewport-tall, so it has to give the pill room too */
+  body.embedded .panel{max-height:calc(100vh - 40px - var(--pill-clear))}
+}
+.result{display:none;margin-top:8px;padding:10px;border-radius:14px;background:var(--card);
+  backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);border:0.4px solid var(--card-bd);
+  align-items:center;gap:10px;flex-wrap:wrap}
+.result.on{display:flex}
+/* The thumbnail keeps a pale bed: it holds the card you just exported, and that
+   card is light. */
+.result img{width:64px;height:36px;object-fit:cover;border-radius:5px;border:1px solid var(--ctrl-bd);background:#f5f5f5}
+.result .meta{font-size:12px;color:var(--ink-2);flex:1;min-width:120px}
+.result .meta b{display:block;color:var(--ink);font-weight:600;font-size:12.5px}
+.danger:active{background:var(--bad-bg);border-color:var(--bad-bd);color:var(--bad)}
+/* The guide used to open as a panel inside this page. It is now a sibling
+   surface in the shell that hosts both, reached from the tab switcher, so the
+   panel, its button and the postMessage handshake behind them are all gone.
+   guide.html still stands alone at its own URL. */
+@media (min-width:1024px){
+  .wrap{padding:20px}
+  .grid{grid-template-columns:minmax(0,1fr) 330px;gap:18px}
+  .stage{max-width:calc((100vh - 250px) * 1.7778)}
+  .panel{position:sticky;top:20px;max-height:calc(100vh - 40px);overflow-y:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <div>
+      <h1>Trades card editor</h1>
+      <p class="sub">Place a chart screenshot, export at 1920 × 1080.</p>
+    </div>
+    <div class="acts">
+      <button type="button" class="btn" id="loadBtn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Load screenshot
+      </button>
+      <button class="btn go" id="exportBtn" disabled>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span id="exportLabel">Export PNG</span>
+      </button>
+    </div>
+  </header>
+
+  <input type="file" id="file" accept="image/*" style="display:none">
+
+  <div class="grid">
+    <div style="min-width:0">
+      <div class="stage" id="stage">
+        <canvas id="cv" width="1920" height="1080"></canvas>
+        <div class="drop" id="drop"><p>Tap Load screenshot<small>or drop a file here, or paste it</small></p></div>
+      </div>
+      <p class="err" id="err"></p>
+      <div class="result" id="result">
+        <img id="resultThumb" alt="">
+        <div class="meta"><b id="resultName">Ready</b><span id="resultNote">Saved to your downloads.</span></div>
+        <button type="button" class="mini" id="dlBtn">Download</button>
+        <button type="button" class="mini" id="shareBtn" style="display:none">Share</button>
+        <button type="button" class="mini" id="tabBtn">Open in tab</button>
+      </div>
+      <p class="tip">Drag to move · pinch or scroll to zoom · arrow keys nudge 1 px</p>
+    </div>
+
+    <aside class="panel">
+      <!-- Background leads the panel, and that is the point rather than a
+           reordering. Every overlay colour is derived from it: the glass keeps
+           its relationship to whatever you pick, the type keeps a trace of its
+           hue and flips to light on dark grounds, the session pill inverts and
+           the hairlines swap with it. Choosing it after the labels meant picking
+           colours the next change would recompute. The field guide reads in the
+           same order. -->
+      <section class="sec">
+        <div class="sech"><h3 class="lab">Background</h3><span class="hint" id="bgHint">#F5F5F5</span></div>
+        <div class="row" id="bgRow"></div>
+        <div class="row" style="margin-top:8px">
+          <label class="pick" id="pickWrap">
+            <input type="color" id="bgPicker" value="#f5f5f5" aria-label="Custom background colour">
+          </label>
+          <input class="field hexf" id="bgHex" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Background hex">
+          <button type="button" class="mini" id="bgReset">Reset</button>
+        </div>
+        <p class="note">Overlays re-derive from whatever you pick — the glass keeps the same relationship to the background, and the labels flip to stay readable on dark colours.</p>
+      </section>
+
+      <section class="sec">
+        <div class="sech"><h3 class="lab">Symbol</h3></div>
+        <p class="cap">Futures</p>
+        <div class="row" id="futRow" style="margin-bottom:10px"></div>
+        <p class="cap">Forex</p>
+        <div class="row" id="fxRow"></div>
+      </section>
+
+      <section class="sec">
+        <div class="sech"><h3 class="lab">Session</h3><span class="hint" id="fadeHint">100%</span></div>
+        <div class="row" id="sessRow"></div>
+        <div class="slider" id="fadeSlider" style="margin-top:8px"><div class="track"></div><div class="fill"></div><div class="thumb"></div></div>
+        <p class="note">Fade on the two inactive labels. 0 keeps them flat grey.</p>
+      </section>
+
+      <section class="sec">
+        <div class="sech"><h3 class="lab">Timeframe</h3></div>
+        <div class="row" id="tfRow"></div>
+        <input class="field" id="tfInput" style="margin-top:8px" placeholder="Custom label">
+      </section>
+
+      <section class="sec">
+        <div class="sech"><h3 class="lab">Zoom</h3><span class="hint" id="zoomHint">100.0%</span></div>
+        <div class="slider" id="zoomSlider" data-off="1"><div class="track"></div><div class="fill"></div><div class="thumb"></div></div>
+        <div class="row" style="margin-top:6px">
+          <button type="button" class="mini" data-z="-0.005">−0.5%</button>
+          <button type="button" class="mini" data-z="-0.001">−0.1%</button>
+          <button type="button" class="mini" data-z="0.001">+0.1%</button>
+          <button type="button" class="mini" data-z="0.005">+0.5%</button>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <button type="button" class="chip chip-fig" id="fitBtn" data-on="1" aria-label="Fit"><svg class="g-fit" viewBox="0 0 48 42" aria-hidden="true"><rect class="fr" x="1" y="1" width="46" height="40" rx="5"/><rect class="br" x="5" y="12" width="38" height="18" rx="2"/></svg><span>Fit</span></button>
+          <button type="button" class="chip chip-fig" id="fillBtn" data-on="0" aria-label="Fill"><svg class="g-fit" viewBox="0 0 48 42" aria-hidden="true"><rect class="dim" x="5" y="-4" width="38" height="50" rx="2"/><rect class="fr" x="1" y="1" width="46" height="40" rx="5"/><rect class="br" x="5" y="5" width="38" height="32" rx="2"/></svg><span>Fill</span></button>
+          <button type="button" class="mini" id="resetBtn">Reset</button>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sech"><h3 class="lab">Position</h3><span class="hint" id="posHint">0, 0 px</span></div>
+        <div class="row">
+          <button type="button" class="mini" data-n="-1,0">←</button>
+          <button type="button" class="mini" data-n="1,0">→</button>
+          <button type="button" class="mini" data-n="0,-1">↑</button>
+          <button type="button" class="mini" data-n="0,1">↓</button>
+          <button type="button" class="mini" data-n="-10,0">←10</button>
+          <button type="button" class="mini" data-n="10,0">10→</button>
+          <button type="button" class="mini" id="centreBtn">Centre</button>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sech"><h3 class="lab">Trim edges</h3><span class="hint" id="sizeHint">—</span></div>
+        <div id="edges"></div>
+        <p class="note">Drag to trim, type for an exact number. Cuts in source pixels, so you can shave a half candle off without the frame jumping — and the first half of each track covers the first quarter of the range, where the shaving actually happens.</p>
+      </section>
+
+      <section class="sec">
+        <div class="sech"><h3 class="lab">Overlay size</h3><span class="hint" id="uiHint">100%</span></div>
+        <div class="slider" id="uiSlider"><div class="track"></div><div class="fill"></div><div class="thumb"></div></div>
+        <div class="sech" style="margin-top:12px"><h3 class="lab">Rail width</h3><span class="hint" id="railHint">Full</span></div>
+        <div class="row" id="railRow"></div>
+        <p class="note">The chips draw it: the bar stays pinned to the card, or comes in with everything else. At 100% they are the same bar.</p>
+        <div class="sech" style="margin-top:12px"><h3 class="lab">Overlay tone</h3><span class="hint" id="tintHint">50%</span></div>
+        <div class="slider" id="tintSlider"><div class="track"></div><div class="fill"></div><div class="thumb"></div></div>
+        <p class="note">Centre blends the panels into the background. Right lifts them toward white, left sinks them into a soft grey so they stay visible.</p>
+      </section>
+
+      <section class="sec">
+        <div class="sech"><h3 class="lab">Wordmark</h3></div>
+        <p class="cap">Logo</p>
+        <div class="row" id="logoRow"></div>
+        <p class="cap" style="margin-top:10px">Username</p>
+        <input class="field" id="handleInput" placeholder="Leave empty for logo only" maxlength="20" autocomplete="off" spellcheck="false">
+        <label class="check"><input type="checkbox" id="markChk" checked> Show on card</label>
+        <p class="note">The Instagram mark is drawn as an outline, so the chart shows through it.</p>
+      </section>
+
+      <section class="sec">
+        <div class="sech"><h3 class="lab">Corner badge</h3><span class="hint" id="logoHint">None</span></div>
+        <input type="file" id="logoFile" accept="image/*" style="display:none">
+        <div class="row">
+          <button type="button" class="mini" id="logoBtn">Upload image</button>
+          <button type="button" class="mini danger" id="logoClear" style="display:none">Remove</button>
+        </div>
+        <div id="logoSizeWrap" style="display:none">
+          <div class="sech" style="margin-top:12px"><h3 class="lab">Badge size</h3><span class="hint" id="logoSizeHint">100%</span></div>
+          <div class="slider" id="logoSizeSlider"><div class="track"></div><div class="fill"></div><div class="thumb"></div></div>
+        </div>
+        <p class="note">Sits at the right end of the bottom rail, opposite the symbol, and scales with the overlay. Size control keeps it right-aligned. It is fitted inside the badge rather than cropped to fill it, so a wide logo stays wide and nothing of it is cut off. Transparent PNG works best.</p>
+      </section>
+
+      <section class="sec">
+        <div class="sech"><h3 class="lab">Export quality</h3><span class="hint" id="expHint">3840 × 2160</span></div>
+        <div class="row" id="expRow"></div>
+        <p class="note">PNG, lossless. Larger sizes redraw every label and badge at full resolution and pull detail from the original screenshot rather than the editing copy.</p>
+      </section>
+
+      <section class="sec" id="removeSec" style="display:none">
+        <button class="mini danger" id="removeBtn">Remove screenshot</button>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<script>
+/* ==================================================================
+   FIXED EXPORT FRAME
+   The on-screen canvas IS the export canvas (1920x1080). Downloading
+   reads that exact canvas, so the file can never differ from the view.
+================================================================== */
+const W = 1920, H = 1080, BG_DEFAULT = "#f5f5f5";
+const POPPINS = 'Poppins, "Helvetica Neue", system-ui, sans-serif';
+const INTER   = 'Inter, "Helvetica Neue", system-ui, sans-serif';
+
+const SYMBOLS = [
+  { id:"NQ", group:"Futures", label:"NQ" },
+  { id:"ES", group:"Futures", label:"ES" },
+  { id:"YM", group:"Futures", label:"YM" },
+  { id:"GC", group:"Futures", label:"GC" },
+  { id:"SI", group:"Futures", label:"SI" },
+  { id:"EURUSD", group:"Forex", label:"EURUSD" },
+  { id:"GBPUSD", group:"Forex", label:"GBPUSD" }
+];
+const SESSIONS = ["London","New York","Asia"];
+const TIMEFRAMES = ["M1","M3","M5","M15","M30","H1","H4","H6","D1","W1"];
+const LOGOS = [
+  { id:"x", label:"X" },
+  { id:"instagram", label:"Instagram" }
+];
+const BACKDROPS = [
+  { hex:"#f5f5f5", name:"Default" },
+  { hex:"#ffffff", name:"Paper white" },
+  { hex:"#efe9df", name:"Warm linen" },
+  { hex:"#e8eef4", name:"Cool mist" },
+  { hex:"#20201c", name:"Charcoal" },
+  { hex:"#0f1116", name:"Midnight" }
+];
+
+/* ------------------------- colour derivation -------------------------------
+   Everything the overlay draws is derived from the background rather than
+   hardcoded, so a new background carries the whole design with it instead of
+   leaving black text on a black card. The numbers below are chosen so that
+   #f5f5f5 reproduces the original palette exactly — ink lands on #1c1c1c and
+   the tone span on 10 up / 32 down — and every other colour follows the same
+   relationships.
+--------------------------------------------------------------------------*/
+function hexRgb(h){
+  h=String(h).trim().replace(/^#/,"");
+  if(h.length===3) h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  const n=parseInt(h,16);
+  if(h.length!==6||isNaN(n)) return null;
+  return [(n>>16)&255,(n>>8)&255,n&255];
+}
+function rgbHex(c){
+  return "#"+c.map(function(v){
+    return Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,"0");
+  }).join("");
+}
+function mixTo(rgb,target,t){
+  return rgb.map(function(v,i){ return v+(target[i]-v)*t; });
+}
+function srgbLin(c){ c/=255; return c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4); }
+function relLum(c){ return 0.2126*srgbLin(c[0])+0.7152*srgbLin(c[1])+0.0722*srgbLin(c[2]); }
+function css(c,a){
+  const r=Math.round(c[0]),g=Math.round(c[1]),b=Math.round(c[2]);
+  return a===undefined ? "rgb("+r+","+g+","+b+")" : "rgba("+r+","+g+","+b+","+a+")";
+}
+
+const BLACK=[0,0,0], WHITE=[255,255,255];
+
+/* Rebuilt whenever the background changes, then read by draw(). */
+function buildPalette(hex){
+  const bg=hexRgb(hex)||hexRgb(BG_DEFAULT);
+  const onDark=relLum(bg)<0.42;
+
+  /* Text keeps a trace of the background's hue rather than going pure black or
+     pure white, which is what stops it reading as a sticker on the card. */
+  const ink       = onDark ? mixTo(bg,WHITE,0.92)  : mixTo(bg,BLACK,0.885);
+  const inkStrong = onDark ? mixTo(bg,WHITE,0.96)  : mixTo(bg,BLACK,0.918);
+  const idle      = mixTo(bg,ink,0.258);   // inactive session labels
+
+  return {
+    bg:bg, hex:rgbHex(bg), onDark:onDark,
+    ink:css(ink), inkStrong:css(inkStrong), idleRgb:idle.map(Math.round).join(","),
+    tabBg: onDark ? css(mixTo(bg,WHITE,0.90)) : "#46443f",
+    tabFg: onDark ? css(mixTo(bg,BLACK,0.80)) : "#ffffff",
+    tabShadow: onDark ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.14)",
+    stroke: onDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.055)",
+    strokeSoft: onDark ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.05)",
+    shadow: onDark ? "rgba(0,0,0,0.38)" : "rgba(0,0,0,0.055)"
+  };
+}
+
+/* ---------------------------- canvas helpers ---------------------------- */
+function rr(ctx,x,y,w,h,r){
+  const rad=Math.min(r,w/2,h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+rad,y); ctx.lineTo(x+w-rad,y); ctx.arcTo(x+w,y,x+w,y+rad,rad);
+  ctx.lineTo(x+w,y+h-rad); ctx.arcTo(x+w,y+h,x+w-rad,y+h,rad);
+  ctx.lineTo(x+rad,y+h); ctx.arcTo(x,y+h,x,y+h-rad,rad);
+  ctx.lineTo(x,y+rad); ctx.arcTo(x,y,x+rad,y,rad); ctx.closePath();
+}
+function glass(ctx,x,y,w,h,r,o){
+  o=o||{};
+  const fill=o.fill||"rgba(252,252,252,0.62)", stroke=o.stroke||"rgba(0,0,0,0.055)",
+        shadow=o.shadow!==false;
+  ctx.save();
+  if(shadow){ctx.shadowColor=o.shadowColor||"rgba(0,0,0,0.055)";ctx.shadowBlur=20;ctx.shadowOffsetY=5;}
+  rr(ctx,x,y,w,h,r); ctx.fillStyle=fill; ctx.fill(); ctx.restore();
+  ctx.save(); rr(ctx,x,y,w,h,r); ctx.lineWidth=1.4; ctx.strokeStyle=stroke; ctx.stroke(); ctx.restore();
+}
+function clipCircle(ctx,cx,cy,r,fn){
+  ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.clip(); fn(); ctx.restore();
+}
+function circleEdge(ctx,cx,cy,r){
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+  ctx.lineWidth=Math.max(1,r*0.07); ctx.strokeStyle="rgba(255,255,255,0.9)"; ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+  ctx.lineWidth=1.2; ctx.strokeStyle="rgba(0,0,0,0.07)"; ctx.stroke();
+  ctx.restore();
+}
+function usFlag(ctx,cx,cy,r){
+  clipCircle(ctx,cx,cy,r,function(){
+    const x0=cx-r,y0=cy-r,s=r*2,sh=s/13;
+    ctx.fillStyle="#ffffff"; ctx.fillRect(x0,y0,s,s);
+    ctx.fillStyle="#b22234";
+    for(let i=0;i<13;i+=2) ctx.fillRect(x0,y0+i*sh,s,sh);
+    ctx.fillStyle="#3c3b6e"; ctx.fillRect(x0,y0,s*0.5,sh*7);
+    ctx.fillStyle="#ffffff";
+    for(let row=0;row<4;row++) for(let col=0;col<4;col++){
+      ctx.beginPath();
+      ctx.arc(x0+s*0.07+col*s*0.115, y0+sh*0.9+row*sh*1.6, r*0.045,0,Math.PI*2);
+      ctx.fill();
+    }
+  });
+  circleEdge(ctx,cx,cy,r);
+}
+function euFlag(ctx,cx,cy,r){
+  clipCircle(ctx,cx,cy,r,function(){
+    ctx.fillStyle="#003399"; ctx.fillRect(cx-r,cy-r,r*2,r*2);
+    ctx.fillStyle="#ffcc00";
+    for(let i=0;i<12;i++){
+      const a=(i/12)*Math.PI*2-Math.PI/2;
+      ctx.beginPath();
+      ctx.arc(cx+Math.cos(a)*r*0.52, cy+Math.sin(a)*r*0.52, r*0.085,0,Math.PI*2);
+      ctx.fill();
+    }
+  });
+  circleEdge(ctx,cx,cy,r);
+}
+function ukFlag(ctx,cx,cy,r){
+  clipCircle(ctx,cx,cy,r,function(){
+    const x0=cx-r,y0=cy-r,s=r*2;
+    ctx.fillStyle="#012169"; ctx.fillRect(x0,y0,s,s);
+    ctx.save(); ctx.lineCap="butt";
+    ctx.strokeStyle="#ffffff"; ctx.lineWidth=s*0.2;
+    ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x0+s,y0+s); ctx.moveTo(x0+s,y0); ctx.lineTo(x0,y0+s); ctx.stroke();
+    ctx.strokeStyle="#c8102e"; ctx.lineWidth=s*0.09;
+    ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x0+s,y0+s); ctx.moveTo(x0+s,y0); ctx.lineTo(x0,y0+s); ctx.stroke();
+    ctx.strokeStyle="#ffffff"; ctx.lineWidth=s*0.28;
+    ctx.beginPath(); ctx.moveTo(cx,y0); ctx.lineTo(cx,y0+s); ctx.moveTo(x0,cy); ctx.lineTo(x0+s,cy); ctx.stroke();
+    ctx.strokeStyle="#c8102e"; ctx.lineWidth=s*0.16;
+    ctx.beginPath(); ctx.moveTo(cx,y0); ctx.lineTo(cx,y0+s); ctx.moveTo(x0,cy); ctx.lineTo(x0+s,cy); ctx.stroke();
+    ctx.restore();
+  });
+  circleEdge(ctx,cx,cy,r);
+}
+function bars(ctx,cx,cy,r,color){
+  ctx.save(); ctx.fillStyle=color;
+  const bw=r*0.66,bh=r*0.34,inset=bh*0.34;
+  function trap(x,y){
+    ctx.beginPath();
+    ctx.moveTo(x-bw/2,y+bh/2); ctx.lineTo(x+bw/2,y+bh/2);
+    ctx.lineTo(x+bw/2-inset,y-bh/2); ctx.lineTo(x-bw/2+inset,y-bh/2);
+    ctx.closePath(); ctx.fill();
+  }
+  trap(cx,cy-r*0.24); trap(cx-bw*0.54,cy+r*0.26); trap(cx+bw*0.54,cy+r*0.26);
+  ctx.restore();
+}
+function numberBadge(ctx,cx,cy,r,bg,text){
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle=bg; ctx.fill();
+  ctx.fillStyle="#ffffff";
+  let size=r*0.86;
+  ctx.font="800 "+size+"px "+INTER;
+  const maxW=r*1.5, w=ctx.measureText(text).width;
+  if(w>maxW){ size=size*(maxW/w); ctx.font="800 "+size+"px "+INTER; }
+  ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillText(text,cx,cy+size*0.04);
+  ctx.restore();
+  circleEdge(ctx,cx,cy,r);
+}
+function metalBadge(ctx,cx,cy,r,bg){
+  ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle=bg; ctx.fill(); ctx.restore();
+  bars(ctx,cx,cy,r,"#ffffff");
+  circleEdge(ctx,cx,cy,r);
+}
+const X_PATH="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68"+
+             "l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z";
+function drawXMark(ctx,cx,cy,size,color){
+  ctx.save();
+  ctx.translate(cx-size/2,cy-size/2);
+  ctx.scale(size/24,size/24);
+  ctx.fillStyle=color;
+  ctx.fill(new Path2D(X_PATH));
+  ctx.restore();
+}
+/* Instagram, drawn as outlines rather than a solid glyph, so the chart shows
+   through the squircle and the lens. Strokes are set inside the scaled space,
+   so they thicken with the mark and rasterise natively at any export size. */
+function drawInstaMark(ctx,cx,cy,size,color){
+  const s=size*0.94;          // a closed outline reads larger than the solid X
+  ctx.save();
+  ctx.translate(cx-s/2,cy-s/2);
+  ctx.scale(s/24,s/24);
+  ctx.strokeStyle=color; ctx.fillStyle=color;
+  ctx.lineWidth=2.1; ctx.lineJoin="round"; ctx.lineCap="round";
+  rr(ctx,2,2,20,20,5.6); ctx.stroke();               // body
+  ctx.beginPath(); ctx.arc(12,12,4.3,0,Math.PI*2); ctx.stroke();   // lens
+  ctx.beginPath(); ctx.arc(17.4,6.6,1.25,0,Math.PI*2); ctx.fill(); // flash dot
+  ctx.restore();
+}
+function drawMark(ctx,id,cx,cy,size,color){
+  if(id==="instagram") return drawInstaMark(ctx,cx,cy,size,color);
+  return drawXMark(ctx,cx,cy,size,color);
+}
+function drawSymbolIcon(ctx,id,cx,cy,r){
+  if(id==="NQ") return numberBadge(ctx,cx,cy,r,"#1f9bf0","100");
+  if(id==="ES") return numberBadge(ctx,cx,cy,r,"#e03131","500");
+  if(id==="YM") return numberBadge(ctx,cx,cy,r,"#1f9bf0","30");
+  if(id==="GC") return metalBadge(ctx,cx,cy,r,"#f2b705");
+  if(id==="SI") return metalBadge(ctx,cx,cy,r,"#b6b9bd");
+  if(id==="EURUSD"||id==="GBPUSD"){
+    const r2=r*0.72;
+    usFlag(ctx,cx+r*0.27,cy-r*0.27,r2);
+    (id==="EURUSD"?euFlag:ukFlag)(ctx,cx-r*0.24,cy+r*0.24,r2);
+    return;
+  }
+}
+/* Downscaling a big screenshot needs an intermediate buffer. Building it
+   per frame exhausts memory during a drag, so it is cached and only
+   rebuilt when the crop or the halving depth actually changes. */
+/* ONE SLOT PER IMAGE, NOT ONE SLOT.
+ *
+ * This was a single cache entry keyed on the crop, which was correct while the
+ * screenshot was the only thing being downscaled. The corner badge is a second
+ * image on the same code path, and a shared slot breaks it two ways: the key
+ * carries no notion of WHICH image built the buffer, so two sources with
+ * matching crop numbers would hand each other the wrong pixels — and even
+ * without that collision they evict each other, so both pyramids get rebuilt
+ * on every single frame of a drag.
+ *
+ * Keyed by image now. The map holds at most a couple of entries, because at
+ * most a couple of images are ever on the card. */
+let PYR_ID = 0;
+const PYR = new Map();          // image id -> {key, canvas}
+function pyrId(img){
+  if(!img.__pyrId) img.__pyrId = ++PYR_ID;
+  return img.__pyrId;
+}
+function releasePyr(){
+  PYR.forEach(function(e){ if(e.canvas){ e.canvas.width=0; e.canvas.height=0; } });
+  PYR.clear();
+}
+function hqSource(img,sx,sy,sw,sh,dw,dh){
+  const ratio=Math.max(sw/dw,sh/dh);
+  if(!(ratio>2)) return null;                 // direct draw is already clean
+  const steps=Math.max(1,Math.floor(Math.log(ratio)/Math.LN2));
+  const id=pyrId(img);
+  const key=[Math.round(sx),Math.round(sy),Math.round(sw),Math.round(sh),steps].join(",");
+  const hit=PYR.get(id);
+  if(hit && hit.key===key && hit.canvas) return hit.canvas;
+
+  let cw=Math.round(sw), ch=Math.round(sh);
+  let buf=document.createElement("canvas"); buf.width=cw; buf.height=ch;
+  let b=buf.getContext("2d");
+  b.imageSmoothingEnabled=true; b.imageSmoothingQuality="high";
+  b.drawImage(img,sx,sy,sw,sh,0,0,cw,ch);
+  for(let i=0;i<steps;i++){
+    const nw=Math.max(1,Math.round(cw/2)), nh=Math.max(1,Math.round(ch/2));
+    const nb=document.createElement("canvas"); nb.width=nw; nb.height=nh;
+    const n=nb.getContext("2d");
+    n.imageSmoothingEnabled=true; n.imageSmoothingQuality="high";
+    n.drawImage(buf,0,0,cw,ch,0,0,nw,nh);
+    buf.width=0; buf.height=0;                // free immediately
+    buf=nb; cw=nw; ch=nh;
+  }
+  /* Only this image's entry is dropped — the other one is still valid and
+     rebuilding it would be the thrash this map exists to prevent. */
+  if(hit && hit.canvas){ hit.canvas.width=0; hit.canvas.height=0; }
+  PYR.set(id,{key:key,canvas:buf});
+  return buf;
+}
+function drawImageHQ(ctx,img,sx,sy,sw,sh,dx,dy,dw,dh,k){
+  k=k||1;
+  ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality="high";
+  if(!(dw>0)||!(dh>0)||!(sw>0)||!(sh>0)) return;
+  const buf=hqSource(img,sx,sy,sw,sh,dw*k,dh*k);
+  if(buf) ctx.drawImage(buf,0,0,buf.width,buf.height,dx,dy,dw,dh);
+  else ctx.drawImage(img,sx,sy,sw,sh,dx,dy,dw,dh);
+}
+
+/* ------------------------------- state ---------------------------------- */
+const S = {
+  img:null, imgFull:null, hasImage:false, imgW:0, imgH:0, fullW:0, fullH:0,
+  exportMul:2,
+  symbol:"NQ", session:"New York", timeframe:"H4",
+  zoom:1, offX:0, offY:0,
+  crop:{l:0,r:0,t:0,b:0},
+  ui:1, tint:50, fade:100, showMark:true, fitMode:"fit",
+  /* The bottom rail's WIDTH, which is a separate question from the overlay's
+     size and always was — it just used to be answered for you. "full" pins it
+     to the card, 16px off each edge, whatever the scale; "fitted" lets it
+     shrink with everything else. At 100% the two are the same bar. */
+  railFull:true,
+  markLogo:"x", handle:"YSERTRADES",
+  /* The corner badge. The Image is kept at its original resolution and never
+     pre-scaled, so an export at 8K draws it at 8K rather than blowing up an
+     editing copy — the same rule the screenshot follows. */
+  logo:null, logoW:0, logoH:0, logoScale:1,
+  bg:BG_DEFAULT, pal:null
+};
+S.pal=buildPalette(S.bg);
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const $ = (id)=>document.getElementById(id);
+
+/* Overlay tone: 0 melts the panels into the #f5f5f5 background, positive
+   lifts them toward white, negative sinks them below the background so the
+   panel reads as a soft grey block. The per-element weights keep their
+   relationship so rail, capsule and pill never drift out of balance. */
+/* Tone moves the panels away from the background, in whichever direction the
+   slider points. The old span of 10 up / 32 down was not arbitrary: 10 is
+   exactly the headroom #f5f5f5 has before it clips at white. Reading that
+   headroom off the actual background generalises the control to any colour and
+   still lands on 10 and 32 at the default, so the feel is unchanged. */
+function glassFill(weight){
+  const t=S.tint;
+  const k=Math.abs(t)/100;
+  const bg=S.pal.bg;
+  let up=t>=0;
+  const room=function(u){ return u ? 255-Math.max(bg[0],bg[1],bg[2]) : Math.min(bg[0],bg[1],bg[2]); };
+  let head=room(up);
+  /* Against pure white there is nothing above the background to lift toward,
+     and against pure black nothing below. Rather than let the panels collapse
+     into the card and vanish, take the separation from the other side. */
+  if(head<6 && room(!up)>head){ up=!up; head=room(up); }
+  const d=(up?1:-1)*Math.min(32,head)*k;
+  const a=Math.min(0.95,(0.30+0.55*k)*weight);
+  return css([bg[0]+d,bg[1]+d,bg[2]+d],a.toFixed(3));
+}
+
+function geometry(){
+  if(!S.img) return null;
+  const sx=S.crop.l, sy=S.crop.t;
+  const sw=Math.max(1,S.imgW-S.crop.l-S.crop.r);
+  const sh=Math.max(1,S.imgH-S.crop.t-S.crop.b);
+  const base = S.fitMode==="fill" ? Math.max(W/sw,H/sh) : Math.min(W/sw,H/sh);
+  const scale=base*S.zoom, dw=sw*scale, dh=sh*scale;
+  return {sx,sy,sw,sh,scale,dw,dh,dx:(W-dw)/2+S.offX,dy:(H-dh)/2+S.offY};
+}
+
+function drawTo(g2,k,useFull){
+  const P=S.pal;
+  g2.setTransform(k,0,0,k,0,0);
+  g2.clearRect(0,0,W,H);
+  g2.fillStyle=P.hex; g2.fillRect(0,0,W,H);
+
+  const g=geometry();
+  if(g && S.img){
+    g2.save(); g2.beginPath(); g2.rect(0,0,W,H); g2.clip();
+    const src=(useFull&&S.imgFull)?S.imgFull:S.img;
+    const sc=(src===S.img)?1:(S.fullW/S.imgW);
+    drawImageHQ(g2,src,g.sx*sc,g.sy*sc,g.sw*sc,g.sh*sc,g.dx,g.dy,g.dw,g.dh,k);
+    g2.restore();
+  }
+
+  const u=S.ui;
+
+  /* ─────────────────────────── TWO SCALES ────────────────────────────
+     One number ran everything, and it made the bottom of the range useless:
+     at 55% the session labels came out 13px tall on a 1080px card, which on a
+     phone is four pixels of grey mush. "Smaller" turned into "gone" long
+     before the slider ran out.
+
+     So the slider drives two curves, not one. FURNITURE moves at the full
+     rate — that is what you are asking for when you drag it. TYPE moves at
+     60% of that rate, so it thins out without disappearing: 73% of its size
+     when the boxes are at 55%, 118% when they are at 130%.
+
+     Boxes then take whichever is larger, their own scaled size or what the
+     type inside them needs. At 100% the two agree to the pixel by
+     construction — every coefficient below is the 100% value divided by its
+     font size — so nothing about a card exported at 100% changes. Below it,
+     the pill stops crushing its label and starts hugging it, which is what a
+     small label should look like anyway. */
+  const ut=0.4+0.6*u;
+  const fit=(scaled,fromType)=>Math.max(scaled,fromType);
+
+  /* session tabs — active one pinned to the centre.
+
+     THE ACTIVE PILL IS A ROUNDED RECTANGLE, NOT A CAPSULE. It used to be 58
+     tall with a radius of half its height, which is the shape a capsule takes
+     whatever you put in it — and at that height it was the loudest object on a
+     card whose subject is the chart. Squarer and shorter reads as a label on
+     the chart rather than a button floating over it, and it stops competing
+     with the timeframe pill at the bottom, which IS a capsule and is meant to
+     be the round one. */
+  const tabPx=Math.round(24*ut);
+  const tabFont="600 "+tabPx+"px "+POPPINS;
+  g2.font=tabFont;
+  const tabH=fit(36*u,tabPx*1.5), tabY=46*u,
+        padX=fit(17*u,tabPx*0.708), gap=fit(19*u,tabPx*0.792),
+        tabR=tabH*0.278;
+  const ai=Math.max(0,SESSIONS.indexOf(S.session));
+  const ordered=[SESSIONS[(ai+2)%3],SESSIONS[ai],SESSIONS[(ai+1)%3]];
+  const tabs=ordered.map(function(label){
+    const tw=g2.measureText(label).width;
+    return {label:label,tw:tw,w:tw+padX*2};
+  });
+  tabs[1].x=(W-tabs[1].w)/2;
+  tabs[0].x=tabs[1].x-gap-tabs[0].w;
+  tabs[2].x=tabs[1].x+tabs[1].w+gap;
+
+  tabs.forEach(function(t,i){
+    const active=(i===1), cx2=t.x+t.w/2;
+    if(active){
+      g2.save();
+      /* A softer shadow than the capsule wore: a shorter shape with a tighter
+         radius shows more of its own edge, so the same blur read as a smudge
+         under it. */
+      g2.shadowColor=P.tabShadow; g2.shadowBlur=12; g2.shadowOffsetY=3;
+      rr(g2,t.x,tabY,t.w,tabH,tabR); g2.fillStyle=P.tabBg; g2.fill();
+      g2.restore();
+    }
+    g2.font=tabFont; g2.textAlign="center"; g2.textBaseline="middle";
+    if(active){ g2.fillStyle=P.tabFg; }
+    else{
+      const left=cx2-t.tw/2;
+      /* fade 0 = flat grey, 100 = fully dissolved at the outer end */
+      const f=S.fade/100;
+      const a0=(1-f).toFixed(3), a1=(1-0.45*f).toFixed(3);
+      const gr=g2.createLinearGradient(left,0,left+t.tw,0);
+      if(i===0){
+        gr.addColorStop(0,"rgba("+P.idleRgb+","+a0+")");
+        gr.addColorStop(0.45,"rgba("+P.idleRgb+","+a1+")");
+        gr.addColorStop(1,"rgba("+P.idleRgb+",1)");
+      }else{
+        gr.addColorStop(0,"rgba("+P.idleRgb+",1)");
+        gr.addColorStop(0.55,"rgba("+P.idleRgb+","+a1+")");
+        gr.addColorStop(1,"rgba("+P.idleRgb+","+a0+")");
+      }
+      g2.fillStyle=gr;
+    }
+    g2.fillText(t.label,cx2,tabY+tabH/2+1*u);
+  });
+
+  /* ─────────────────────────── THE BOTTOM RAIL ───────────────────────────
+     THIS IS WHERE "SMALLER" STOPPED MEANING SMALLER. The rail's height was on
+     the scale and its WIDTH WAS NOT — it was hard-wired to W-32, pinned 16px
+     off the bottom, at every setting. Pull the slider down and the furniture
+     inside got tiny while the bar it sat in still ran the full 1888px, so the
+     overlay staked out exactly as much card as before and just looked
+     starved: a hairline stripe from edge to edge with a speck at each end.
+     Nothing was synced to anything.
+
+     FITTED puts both dimensions on the scale: the bar is (W-32)·u wide and
+     centred, and the gap under it is 16·u, so a 55% overlay covers 55% of the
+     width it covered at 100%. Above 100% it can still grow, but only until it
+     is 8px off the edge; past that there is no card left to take.
+
+     FULL keeps the frame the card gave it — x=16, W-32 wide, 16 off the
+     bottom — and lets only the furniture inside it scale. That is what the
+     rail did before it was on the scale at all, and it is a real choice
+     rather than the old bug: a wide bar under a busy chart reads as a
+     deliberate plinth, and a small overlay riding the full width is a look,
+     not a mistake. The mistake was that you could not say which you wanted.
+
+     At 100% the two are the same bar to the pixel, which is why this switch
+     can default to full without changing anything anybody already made. */
+  const symPx=Math.round(28*ut);
+  const iconR=fit(32*u,symPx*1.143), railPad=iconR*0.469;
+  const barH=iconR*2+railPad*2;
+  const barW=S.railFull?(W-32):Math.min(W-16,(W-32)*u);
+  const barX=(W-barW)/2;
+  const barY=H-(S.railFull?16:16*u)-barH;
+  glass(g2,barX,barY,barW,barH,barH/2,{fill:glassFill(1),stroke:P.strokeSoft,shadowColor:P.shadow});
+
+  /* symbol badge + capsule */
+  const cy=barY+barH/2;
+  const iconCX=barX+railPad+iconR;
+  const sym=SYMBOLS.filter(function(s){return s.id===S.symbol;})[0]||SYMBOLS[0];
+  const symFont="600 "+symPx+"px "+INTER;
+  g2.font=symFont;
+  const tw=g2.measureText(sym.label).width;
+  const capH=fit(58*u,symPx*2.071), capX=iconCX+iconR*0.42, textX=iconCX+iconR+26*u;
+  glass(g2,capX,cy-capH/2,textX-capX+tw+30*u,capH,capH/2,
+        {fill:glassFill(1.25),stroke:P.stroke,shadow:false});
+  g2.font=symFont; g2.fillStyle=P.ink;
+  g2.textAlign="left"; g2.textBaseline="middle";
+  g2.fillText(sym.label,textX,cy+1*u);
+  drawSymbolIcon(g2,sym.id,iconCX,cy,iconR);
+
+  /* corner badge — the mirror of the symbol, at the other end of the rail.
+
+     CONTAIN, NOT COVER. The box is square because the symbol opposite it is,
+     but almost no logo is: fitting the image inside its box preserves the
+     aspect ratio and shows all of it, where filling the box would crop a wide
+     mark down to its middle. `inset` keeps it off its own rounded corners so it
+     reads as a badge rather than as a picture jammed into a hole.
+
+     Drawn from the ORIGINAL image at whatever k the export is running at, so
+     the badge is as sharp as the size you picked — the same rule the screenshot
+     follows. */
+  if(S.logo && S.logoW>0 && S.logoH>0){
+    const bs=iconR*2*S.logoScale, inset=bs*0.14;
+    const bx=barX+barW-railPad-bs, by=cy-bs/2;
+    g2.save();
+    rr(g2,bx,by,bs,bs,bs*0.26); g2.clip();
+    const avail=bs-inset*2;
+    const sc=Math.min(avail/S.logoW,avail/S.logoH);
+    const dw=S.logoW*sc, dh=S.logoH*sc;
+    drawImageHQ(g2,S.logo,0,0,S.logoW,S.logoH,
+                bx+(bs-dw)/2,by+(bs-dh)/2,dw,dh,k);
+    g2.restore();
+  }
+
+  /* wordmark, centred. With no username the logo centres on its own rather
+     than leaving a dangling slash. */
+  if(S.showMark){
+    const markPx=Math.round(26*ut);
+    const markSize=fit(27*u,markPx*1.038), markText=S.handle?("/ "+S.handle):"";
+    g2.save();
+    if("letterSpacing" in g2) g2.letterSpacing=(1.2*ut)+"px";
+    g2.font="400 "+markPx+"px "+POPPINS;
+    const mtw=markText?g2.measureText(markText).width:0, mgap=markText?fit(14*u,markPx*0.538):0;
+    const gx=W/2-(markSize+mgap+mtw)/2;
+    drawMark(g2,S.markLogo,gx+markSize/2,cy,markSize,P.ink);
+    if(markText){
+      g2.fillStyle=P.ink; g2.textAlign="left"; g2.textBaseline="middle";
+      g2.fillText(markText,gx+markSize+mgap,cy+1*u);
+    }
+    if("letterSpacing" in g2) g2.letterSpacing="0px";
+    g2.restore();
+  }
+
+  /* timeframe pill */
+  const tfPx=Math.round(30*ut);
+  const tfFont="700 "+tfPx+"px "+POPPINS;
+  g2.font=tfFont;
+  const tfw=g2.measureText(S.timeframe).width;
+  const tfH=fit(62*u,tfPx*2.067);
+  const tfW=Math.max(fit(104*u,tfPx*3.467),tfw+fit(56*u,tfPx*1.867));
+  const tfY=barY-fit(20*u,tfPx*0.667)-tfH;
+  glass(g2,(W-tfW)/2,tfY,tfW,tfH,tfH*0.355,{fill:glassFill(1.05),stroke:P.strokeSoft,shadowColor:P.shadow});
+  g2.font=tfFont; g2.fillStyle=P.inkStrong;
+  g2.textAlign="center"; g2.textBaseline="middle";
+  g2.fillText(S.timeframe,W/2,tfY+tfH/2+1*u);
+  g2.setTransform(1,0,0,1,0,0);
+}
+
+function draw(){ drawTo(ctx,1,false); }
+
+/* ------------------------------ controls -------------------------------- */
+/* Interaction fires far faster than the screen refreshes. Coalescing into
+   one update per frame keeps drag and pinch smooth instead of backing up. */
+let framePending=false;
+function update(){
+  if(framePending) return;
+  framePending=true;
+  requestAnimationFrame(function(){
+    framePending=false;
+    refreshHints();
+    draw();
+  });
+}
+
+function chip(label,on,fn){
+  const b=document.createElement("button");
+  b.className="chip"; b.type="button"; b.textContent=label; b.dataset.on=on?"1":"0";
+  b.onclick=fn; return b;
+}
+function buildChips(){
+  const fut=$("futRow"), fx=$("fxRow"), se=$("sessRow"), tf=$("tfRow"), lg=$("logoRow");
+  fut.innerHTML=fx.innerHTML=se.innerHTML=tf.innerHTML=lg.innerHTML="";
+  LOGOS.forEach(function(o){
+    /* The real mark, from the card's own drawMark, in the chip's own ink. */
+    lg.appendChild(figChip(function(g,S0,ink){
+      drawMark(g,o.id,S0/2,S0/2,S0*0.78,ink);
+    },o.label,S.markLogo===o.id,function(){
+      S.markLogo=o.id; buildChips(); draw();
+    }));
+  });
+  SYMBOLS.forEach(function(s){
+    /* The badge exactly as the card draws it, brand colour and all — which is
+       the point: you pick the thing you are looking at rather than its name. */
+    const b=figChip(function(g,S0){
+      drawSymbolIcon(g,s.id,S0/2,S0/2,S0*0.46);
+    },s.label,S.symbol===s.id,function(){S.symbol=s.id;buildChips();draw();});
+    (s.group==="Futures"?fut:fx).appendChild(b);
+  });
+  SESSIONS.forEach(function(s,i){
+    se.appendChild(figChip(sessGlyph(i),s,S.session===s,function(){
+      S.session=s; buildChips(); draw();
+    }));
+  });
+  TIMEFRAMES.forEach(function(t){
+    tf.appendChild(chip(t,S.timeframe===t,function(){
+      S.timeframe=t; $("tfInput").value=t; buildChips(); draw();
+    }));
+  });
+}
+
+function makeSlider(el,opts){
+  const fill=el.querySelector(".fill"), thumb=el.querySelector(".thumb");
+  let active=false;
+  /* A MOVING CEILING AND A BENT TRACK, both optional and both off by default,
+     so every slider that existed before this behaves exactly as it did.
+
+     `max` may be a function because the trim edges limit each other: how far
+     left can be pushed depends on where right already is.
+
+     `curve` maps the track position to the value and `uncurve` maps it back.
+     A linear trim slider on a 3840px screenshot moves ~15px of image per pixel
+     of track on a phone, which is useless for the shaving that trimming
+     actually is. Squaring the track spends its first half on the first
+     quarter of the range and still reaches the far end. */
+  const curve=opts.curve||function(t){return t;};
+  const uncurve=opts.uncurve||function(x){return x;};
+  const top=function(){ return typeof opts.max==="function"?opts.max():opts.max; };
+  function paint(){
+    const span=top()-opts.min;
+    const raw=span>0?(opts.get()-opts.min)/span:0;
+    const pct=Math.max(0,Math.min(100,uncurve(Math.max(0,Math.min(1,raw)))*100));
+    fill.style.width=pct+"%";
+    /* INSET, NOT CENTRED. It used to be centred on the value — pct% minus half
+       a thumb — which hangs half the thumb off the end of the track at 0 and at
+       100. No slider that existed before this ever sat at either end, so it
+       never showed; the four trim edges all start at 0 and all showed it at
+       once, and it read as the row being clipped rather than the thumb being
+       loose. Travelling across (track − thumb) keeps it inside at both ends and
+       is identical to the old placement in the middle, which is where every
+       other slider lives. */
+    const tw=thumb.offsetWidth||20;
+    thumb.style.left="calc("+pct+"% - "+((pct/100)*tw).toFixed(2)+"px)";
+  }
+  function commit(clientX){
+    if(el.dataset.off==="1") return;
+    const r=el.getBoundingClientRect();
+    const mx=top();
+    let t=Math.max(0,Math.min(1,(clientX-r.left)/r.width));
+    let v=opts.min+curve(t)*(mx-opts.min);
+    v=Math.round(v/opts.step)*opts.step;
+    v=Math.min(mx,Math.max(opts.min,+v.toFixed(4)));
+    opts.set(v); paint();
+  }
+  el.addEventListener("pointerdown",function(e){
+    if(el.dataset.off==="1") return;
+    active=true;
+    /* Capture is a nicety — if it is refused the drag must still work, so it
+       must not come before the commit. */
+    try{ el.setPointerCapture(e.pointerId); }catch(err){}
+    commit(e.clientX);
+  });
+  el.addEventListener("pointermove",function(e){ if(active) commit(e.clientX); });
+  el.addEventListener("pointerup",function(e){
+    active=false; try{el.releasePointerCapture(e.pointerId);}catch(err){}
+  });
+  el.addEventListener("pointercancel",function(){active=false;});
+  el.paint=paint; paint();
+  return el;
+}
+
+/* NO 8K. It was never really an export on a phone — it was a crash.
+   7680x4320 is 33 million pixels and the supersampled pass asks for 132
+   million, which is roughly half a gigabyte of backing store. iOS does not
+   refuse that politely; the tab dies before any of our code gets to notice.
+   6K is the biggest size a device in a pocket has any business attempting, and
+   at 5760x3240 it is already larger than anything that will be looked at. */
+const EXPORT_SIZES=[
+  {mul:1,label:"1080p"},
+  {mul:2,label:"4K"},
+  {mul:3,label:"6K"}
+];
+/* THE WIDTHS ARE NOT STYLISED — they are the card's, to scale, because width
+   is the only thing this switch changes. The frame spans x=1 to x=63, so 62
+   units stand for 1920px and one unit is 30.97px. The full rail is 1888px at
+   x=16, which is 60.97 units at x=1.52. Fitted is the same bar at 60% — the
+   middle of the slider's travel, and the width the switch actually buys you —
+   centred, so 36.58 units at x=13.71. Change the geometry in drawTo and these
+   two numbers change with it.
+
+   The bar's THICKNESS is not to scale, and cannot be: 94px of 1080 comes out
+   at 3 units in a 36-unit glyph, which at 21 CSS pixels tall is a hairline.
+   It is drawn heavy enough to read. Nothing about the choice depends on it. */
+const RAIL_MODES=[
+  {id:"full",  label:"Full width", bar:[1.52, 60.97]},
+  {id:"fitted",label:"Fitted",     bar:[13.71, 36.58]}
+];
+function railGlyph(bar){
+  return '<svg class="g-rail" viewBox="0 0 64 36" aria-hidden="true">'
+       + '<rect class="fr" x="1" y="1" width="62" height="34" rx="5"/>'
+       + '<rect class="br" x="'+bar[0]+'" y="25.5" width="'+bar[1]+'" height="5" rx="2.5"/>'
+       + '</svg>';
+}
+
+/* One chip, one glyph, one label. `art` is either an SVG string or a function
+   handed a 2D context to paint — the two cases exist because some of these
+   marks are already drawn by the card's own code and there is no sense owning
+   a second copy of an Instagram outline in path data. */
+function figChip(art,label,on,fn){
+  const b=chip("",on,fn);
+  b.className="chip chip-fig";
+  b.setAttribute("aria-label",label);
+  if(typeof art==="string"){
+    b.innerHTML=art+"<span>"+label+"</span>";
+  }else{
+    const cv=document.createElement("canvas");
+    const dpr=Math.min(3,window.devicePixelRatio||1), S0=21;
+    cv.width=Math.round(S0*dpr); cv.height=Math.round(S0*dpr);
+    b.appendChild(cv);
+    const sp=document.createElement("span"); sp.textContent=label; b.appendChild(sp);
+    /* Painted after it is in the DOM, because a canvas glyph that follows the
+       chip's ink has to be able to ask what that ink currently is. */
+    requestAnimationFrame(function(){
+      const g=cv.getContext("2d");
+      g.setTransform(dpr,0,0,dpr,0,0);
+      art(g,S0,getComputedStyle(b).color);
+    });
+  }
+  return b;
+}
+
+/* Where the session sits on the card: three tabs, and the one you are picking
+   is the filled one in the middle position it will occupy — the active tab is
+   always centred, so the glyph shows the neighbours moving, not the pill. */
+function sessGlyph(i){
+  var x=[1,10.5,20], out="";
+  for(var k=0;k<3;k++)
+    out+='<rect class="'+(k===i?"br":"dim")+'" x="'+x[k]+'" y="'+(k===i?2:4)+'" '
+       + 'width="'+(k===i?8:6)+'" height="'+(k===i?10:6)+'" rx="'+(k===i?2:1.5)+'"/>';
+  return '<svg class="g-sess" viewBox="0 0 28 14" aria-hidden="true">'+out+'</svg>';
+}
+function buildRail(){
+  const row=$("railRow"); row.innerHTML="";
+  RAIL_MODES.forEach(function(o){
+    const on=(o.id==="full")===S.railFull;
+    const b=chip("",on,function(){
+      S.railFull=(o.id==="full"); buildRail(); refreshHints(); draw();
+    });
+    b.className="chip chip-fig";
+    b.innerHTML=railGlyph(o.bar)+"<span>"+o.label+"</span>";
+    b.setAttribute("aria-label",o.label+" rail");
+    row.appendChild(b);
+  });
+}
+function buildExport(){
+  const row=$("expRow"); row.innerHTML="";
+  EXPORT_SIZES.forEach(function(o){
+    const b=chip(o.label+"  "+(W*o.mul)+"×"+(H*o.mul), S.exportMul===o.mul, function(){
+      S.exportMul=o.mul; buildExport(); refreshHints();
+    });
+    row.appendChild(b);
+  });
+}
+
+/* ------------------------------ background ------------------------------ */
+function applyBg(hex,fromHexField){
+  const rgb=hexRgb(hex);
+  if(!rgb) return false;
+  S.bg=rgbHex(rgb);
+  S.pal=buildPalette(S.bg);
+  $("bgPicker").value=S.bg;
+  if(!fromHexField) $("bgHex").value=S.bg.toUpperCase();
+  buildBackdrops();
+  refreshHints();
+  draw();
+  return true;
+}
+function buildBackdrops(){
+  const row=$("bgRow"); row.innerHTML="";
+  BACKDROPS.forEach(function(o){
+    const b=document.createElement("button");
+    b.type="button"; b.className="sw"; b.style.background=o.hex;
+    b.title=o.name+" · "+o.hex.toUpperCase();
+    b.setAttribute("aria-label",o.name);
+    b.dataset.on=(S.bg.toLowerCase()===o.hex.toLowerCase())?"1":"0";
+    b.onclick=function(){ applyBg(o.hex); };
+    row.appendChild(b);
+  });
+}
+
+/* SIXTEEN BUTTONS BECAME FOUR SLIDERS.
+
+   Each edge used to be −, a number, +, +10 — four taps to move ten pixels and
+   forty to move a hundred, times four edges. Trimming is a continuous gesture
+   being asked for in discrete increments, which is the wrong shape for it: you
+   are watching the card, not counting, and the answer is "there", not "+37".
+
+   The number stays. It is the one thing a slider is bad at — typing an exact
+   value, and reading back what you landed on — and it is now a readout you can
+   also edit rather than the only way in.
+
+   Each slider's ceiling is a function, not a constant, because the two edges of
+   an axis share a budget: left can only travel as far as right has left it,
+   less the 20px of image setCropEdge insists on keeping. */
+const EDGE_PAIR={l:"r",r:"l",t:"b",b:"t"};
+function edgeMax(edge){
+  if(!S.img) return 0;
+  const horiz=(edge==="l"||edge==="r");
+  const span=horiz?S.imgW:S.imgH;
+  return Math.max(0,span-S.crop[EDGE_PAIR[edge]]-20);
+}
+function buildEdges(){
+  const box=$("edges"); box.innerHTML="";
+  [["Left","l"],["Right","r"],["Top","t"],["Bottom","b"]].forEach(function(pair){
+    const label=pair[0], edge=pair[1];
+    const row=document.createElement("div"); row.className="edge";
+    const sp=document.createElement("span"); sp.textContent=label; row.appendChild(sp);
+
+    const sl=document.createElement("div");
+    sl.className="slider edge-slider";
+    sl.innerHTML='<div class="track"></div><div class="fill"></div><div class="thumb"></div>';
+    sl.setAttribute("aria-label",label+" trim");
+    row.appendChild(sl);
+
+    const inp=document.createElement("input");
+    inp.className="num"; inp.type="number"; inp.value=S.crop[edge]; inp.min="0";
+    inp.dataset.edge=edge;
+    inp.oninput=function(){ setCropEdge(edge,Number(inp.value)||0,true); };
+    row.appendChild(inp);
+
+    makeSlider(sl,{
+      min:0, max:function(){ return edgeMax(edge); }, step:1,
+      curve:function(t){ return t*t; },
+      uncurve:function(x){ return Math.sqrt(x); },
+      get:function(){ return S.crop[edge]; },
+      set:function(v){ setCropEdge(edge,v); }
+    });
+    box.appendChild(row);
+  });
+  syncEdges();
+}
+function syncEdges(){
+  document.querySelectorAll("#edges input").forEach(function(i){
+    if(document.activeElement!==i) i.value=S.crop[i.dataset.edge];
+  });
+  /* Both edges of an axis repaint, not just the one that moved: shifting left
+     changes how far right is ALLOWED to go, so its thumb sits somewhere else
+     on the track even though its value did not change. */
+  document.querySelectorAll("#edges .edge-slider").forEach(function(s){
+    if(s.paint) s.paint();
+  });
+}
+function setCropEdge(edge,value,fromInput){
+  if(!S.img) return;
+  const v=Math.max(0,Math.round(value));
+  const n=Object.assign({},S.crop); n[edge]=v;
+  if(n.l+n.r>S.imgW-20) return;
+  if(n.t+n.b>S.imgH-20) return;
+  S.crop=n;
+  /* Always, not only when the change came from a button. syncEdges skips the
+     field you are typing in on its own, and the sliders have to move whatever
+     moved the value — including the opposite edge's ceiling shifting. */
+  syncEdges();
+  update();
+}
+
+function refreshHints(){
+  $("zoomHint").textContent=(S.zoom*100).toFixed(1)+"%";
+  $("posHint").textContent=S.offX+", "+S.offY+" px";
+  /* Both numbers, because there are two. The first is the footprint, which is
+     what the slider sets; the second is the type, which deliberately does not
+     travel as far so the labels stay readable at the bottom of the range.
+     Saying only the first would be the same lie the old single scale told. */
+  const uiPct=Math.round(S.ui*100), typePct=Math.round((0.4+0.6*S.ui)*100);
+  $("uiHint").textContent=uiPct===typePct?uiPct+"%":uiPct+"% · type "+typePct+"%";
+  /* Says what the choice is WORTH, not just which chip is lit — at 100% the
+     two modes draw the same bar, and a hint that read "Full" there would imply
+     a difference the card does not have. */
+  $("railHint").textContent=S.railFull
+    ? (uiPct===100?"Full · same as fitted here":"Full")
+    : (uiPct===100?"Fitted · same as full here":"Fitted "+Math.round(Math.min(1,S.ui)*100)+"%");
+  const tn=Math.round(S.tint);
+  $("tintHint").textContent = tn===0 ? "flat" : (tn>0 ? "+"+tn+" lighter" : tn+" darker");
+  $("fadeHint").textContent=Math.round(S.fade)+"%";
+  $("sizeHint").textContent=S.fullW?(S.fullW+" × "+S.fullH):"—";
+  $("expHint").textContent=(W*S.exportMul)+" × "+(H*S.exportMul);
+  $("bgHint").textContent=S.bg.toUpperCase();
+  $("logoSizeHint").textContent=Math.round(S.logoScale*100)+"%";
+  $("fitBtn").dataset.on=S.fitMode==="fit"?"1":"0";
+  $("fillBtn").dataset.on=S.fitMode==="fill"?"1":"0";
+  zoomSlider.paint();
+}
+
+/* ------------------------------ interaction ----------------------------- */
+function canvasPoint(e){
+  const r=cv.getBoundingClientRect();
+  return {x:((e.clientX-r.left)/r.width)*W, y:((e.clientY-r.top)/r.height)*H};
+}
+const ptrs=new Map();
+let dragState=null, pinchState=null;
+
+cv.addEventListener("pointerdown",function(e){
+  if(!S.hasImage) return;
+  cv.setPointerCapture(e.pointerId);
+  const p=canvasPoint(e);
+  ptrs.set(e.pointerId,p);
+  if(ptrs.size===2){
+    const v=[...ptrs.values()], a=v[0], b=v[1], g=geometry();
+    if(!g) return;
+    dragState=null;
+    pinchState={dist:Math.hypot(a.x-b.x,a.y-b.y)||1,
+                mid:{x:(a.x+b.x)/2,y:(a.y+b.y)/2}, zoom0:S.zoom, g0:g};
+  }else if(ptrs.size===1){
+    dragState={px:p.x,py:p.y,ox:S.offX,oy:S.offY};
+  }
+});
+cv.addEventListener("pointermove",function(e){
+  if(!ptrs.has(e.pointerId)) return;
+  const p=canvasPoint(e);
+  ptrs.set(e.pointerId,p);
+  if(pinchState && ptrs.size>=2){
+    const v=[...ptrs.values()], a=v[0], b=v[1];
+    const dist=Math.hypot(a.x-b.x,a.y-b.y)||1;
+    const mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+    const next=Math.min(6,Math.max(0.2,pinchState.zoom0*(dist/pinchState.dist)));
+    const g0=pinchState.g0;
+    const ux=(pinchState.mid.x-g0.dx)/g0.scale, uy=(pinchState.mid.y-g0.dy)/g0.scale;
+    const ns=g0.scale*(next/pinchState.zoom0);
+    const sw=g0.dw/g0.scale, sh=g0.dh/g0.scale;
+    S.zoom=next;
+    S.offX=Math.round(mid.x-ux*ns-(W-sw*ns)/2);
+    S.offY=Math.round(mid.y-uy*ns-(H-sh*ns)/2);
+    update();
+    return;
+  }
+  if(!dragState) return;
+  S.offX=Math.round(dragState.ox+(p.x-dragState.px));
+  S.offY=Math.round(dragState.oy+(p.y-dragState.py));
+  update();
+});
+function endPointer(e){
+  ptrs.delete(e.pointerId);
+  if(ptrs.size<2) pinchState=null;
+  if(ptrs.size===1){
+    const p=[...ptrs.values()][0];
+    dragState={px:p.x,py:p.y,ox:S.offX,oy:S.offY};
+  }else if(ptrs.size===0){ dragState=null; }
+  try{cv.releasePointerCapture(e.pointerId);}catch(err){}
+}
+cv.addEventListener("pointerup",endPointer);
+cv.addEventListener("pointercancel",endPointer);
+
+cv.addEventListener("wheel",function(e){
+  if(!S.hasImage) return;
+  e.preventDefault();
+  const g=geometry(); if(!g) return;
+  const p=canvasPoint(e);
+  const step=e.shiftKey?0.002:0.02;
+  const next=Math.min(6,Math.max(0.2,S.zoom*(1-Math.sign(e.deltaY)*step)));
+  const ratio=next/S.zoom;
+  S.zoom=next;
+  S.offX=Math.round(p.x-(p.x-g.dx)*ratio-(W-g.dw*ratio)/2);
+  S.offY=Math.round(p.y-(p.y-g.dy)*ratio-(H-g.dh*ratio)/2);
+  update();
+},{passive:false});
+
+window.addEventListener("keydown",function(e){
+  if(!S.hasImage) return;
+  const tag=(e.target.tagName||"").toLowerCase();
+  if(tag==="input"||tag==="textarea") return;
+  const step=e.shiftKey?10:1;
+  const map={ArrowLeft:[-step,0],ArrowRight:[step,0],ArrowUp:[0,-step],ArrowDown:[0,step]};
+  if(map[e.key]){
+    S.offX+=map[e.key][0]; S.offY+=map[e.key][1];
+    update(); e.preventDefault();
+  }
+});
+
+/* ------------------------------ file input ------------------------------ */
+function showError(msg){
+  const el=$("err");
+  el.textContent=msg||"";
+  el.style.display=msg?"block":"none";
+}
+function loadFile(file){
+  if(!file) return;
+  if(file.type && file.type.indexOf("image/")!==0){
+    showError("That file isn't an image. Use a PNG, JPG or WebP screenshot.");
+    return;
+  }
+  showError("");
+  $("drop").querySelector("p").innerHTML="Reading image…";
+  const reader=new FileReader();
+  reader.onerror=function(){
+    showError("Couldn't read that file. Try saving it as PNG and loading again.");
+    resetDropText();
+  };
+  reader.onload=function(){
+    const im=new Image();
+    im.onload=function(){
+      /* The editor drives off a lighter copy so panning stays smooth, but
+         the untouched original is kept and used for export, so nothing
+         about the full-resolution detail is thrown away. */
+      let src=im, iw=im.naturalWidth, ih=im.naturalHeight;
+      S.imgFull=im; S.fullW=iw; S.fullH=ih;
+      const MAX=3840, big=Math.max(iw,ih);
+      if(big>MAX){
+        const k=MAX/big;
+        const pre=document.createElement("canvas");
+        pre.width=Math.round(iw*k); pre.height=Math.round(ih*k);
+        const p=pre.getContext("2d");
+        p.imageSmoothingEnabled=true; p.imageSmoothingQuality="high";
+        p.drawImage(im,0,0,pre.width,pre.height);
+        src=pre; iw=pre.width; ih=pre.height;
+      }
+      releasePyr();
+      S.img=src; S.imgW=iw; S.imgH=ih; S.hasImage=true;
+      S.crop={l:0,r:0,t:0,b:0}; S.zoom=1; S.offX=0; S.offY=0; S.fitMode="fit";
+      $("drop").style.display="none";
+      $("exportBtn").disabled=false;
+      $("removeSec").style.display="block";
+      $("zoomSlider").dataset.off="0";
+      cv.style.cursor="grab";
+      syncEdges(); refreshHints(); draw();
+    };
+    im.onerror=function(){
+      showError("That image didn't decode. HEIC from iPhone often fails — save it as PNG or JPG.");
+      resetDropText();
+    };
+    im.src=reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+function resetDropText(){
+  $("drop").querySelector("p").innerHTML='Tap Load screenshot<small>or drop a file here, or paste it</small>';
+}
+
+$("loadBtn").onclick=function(){ $("file").click(); };
+$("file").onchange=function(e){ loadFile(e.target.files[0]); e.target.value=""; };
+
+const stage=$("stage");
+stage.addEventListener("dragover",function(e){ e.preventDefault(); });
+stage.addEventListener("drop",function(e){
+  e.preventDefault();
+  if(e.dataTransfer.files && e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+window.addEventListener("paste",function(e){
+  const items=(e.clipboardData&&e.clipboardData.items)||[];
+  for(let i=0;i<items.length;i++){
+    if(items[i].type.indexOf("image/")===0){
+      loadFile(items[i].getAsFile());
+      e.preventDefault();
+      break;
+    }
+  }
+});
+
+/* -------------------------------- export -------------------------------- */
+/* --------------------------- delivering the file -------------------------
+   Embedded in an iframe (Whop, Notion, any host) a plain download can be
+   blocked by the frame sandbox. So the file is held onto and offered three
+   ways: direct download, the native share sheet, and opening in a new tab
+   where it can be saved by hand. One of those works everywhere.
+--------------------------------------------------------------------------*/
+const EMBEDDED = (function(){ try{ return window.self!==window.top; }catch(e){ return true; } })();
+let lastBlob=null, lastUrl=null, lastName="";
+
+function deliver(blobOrUrl,name){
+  if(lastUrl){ try{URL.revokeObjectURL(lastUrl);}catch(e){} lastUrl=null; }
+  lastName=name;
+  lastBlob=(typeof blobOrUrl==="string")?null:blobOrUrl;
+  try{ lastUrl=lastBlob?URL.createObjectURL(lastBlob):blobOrUrl; }
+  catch(e){ lastUrl=null; }
+
+  const res=$("result");
+  res.classList.add("on");
+  $("resultName").textContent=name;
+  if(lastUrl) $("resultThumb").src=lastUrl;
+
+  const ok=triggerDownload();
+  $("resultNote").textContent = ok
+    ? "Saved to your downloads. If nothing appeared, use Share or Open in tab."
+    : "Use Download, Share, or Open in tab to save it.";
+
+  const f=shareFile();
+  $("shareBtn").style.display = f ? "inline-flex" : "none";
+}
+
+function shareFile(){
+  if(!lastBlob || !navigator.canShare || typeof File==="undefined") return null;
+  try{
+    const f=new File([lastBlob],lastName,{type:"image/png"});
+    return navigator.canShare({files:[f]}) ? f : null;
+  }catch(e){ return null; }
+}
+
+function triggerDownload(){
+  if(!lastUrl) return false;
+  try{
+    const a=document.createElement("a");
+    a.href=lastUrl; a.download=lastName; a.rel="noopener";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    return true;
+  }catch(e){ return false; }
+}
+
+$("dlBtn").onclick=function(){ triggerDownload(); };
+$("tabBtn").onclick=function(){
+  if(!lastUrl) return;
+  const w=window.open(lastUrl,"_blank","noopener");
+  if(!w) $("resultNote").textContent="Your browser blocked the new tab. Allow pop-ups, or use Share.";
+};
+$("shareBtn").onclick=function(){
+  const f=shareFile();
+  if(!f) return;
+  navigator.share({files:[f],title:lastName}).catch(function(){});
+};
+
+$("exportBtn").onclick=function(){
+  if(!S.hasImage) return;
+  const btn=$("exportBtn");
+  btn.disabled=true; $("exportLabel").textContent="Exporting…";
+  showError("");
+  $("result").classList.remove("on");
+
+  /* Render offscreen at the chosen size. Every overlay is vector drawn, so it
+     is rasterised natively at the output resolution rather than scaled up
+     from the preview.
+
+     Every size is supersampled: render larger, then resolve down, which is what
+     actually cleans up the edges of the badges, the pill and the type.
+
+     THE CEILING USED TO BE 4, AND THAT MADE THE BIGGEST EXPORT THE SOFTEST.
+     renderK was min(4, mul*2), so 1080p and 4K each got a full double pass
+     while 6K got a third of one and 8K got NONE — it rendered at 7680 and saved
+     at 7680. Choosing the largest size bought pixels and quietly gave up the
+     anti-aliasing that made the smaller ones look clean, which is the opposite
+     of what picking it means.
+
+     So it is a ladder now rather than a single guess, tried highest first: a
+     full double pass where the device can hold it, a partial one if not, and
+     the plain native redraw as the floor. attempt() returns null rather than
+     throwing when a canvas that size cannot be allocated, so the step down
+     costs a failed allocation and nothing else — no quality is assumed that the
+     phone in your hand cannot actually deliver. */
+  const mul=S.exportMul;
+  const ladder=[mul*2,Math.ceil(mul*1.5),mul]
+    .filter(function(v,i,a){ return v>=mul && a.indexOf(v)===i; })
+    .sort(function(a,b){ return b-a; });
+  const outW=W*mul, outH=H*mul;
+  const name=S.symbol+"-"+S.session.replace(/\s+/g,"")+"-"+S.timeframe+"-"+outW+"x"+outH+".png";
+
+  function finish(){ btn.disabled=false; $("exportLabel").textContent="Export PNG"; releasePyr(); }
+  function save(blobOrUrl){ deliver(blobOrUrl,name); finish(); }
+
+  function attempt(k){
+    let big=null,out=null;
+    try{
+      big=document.createElement("canvas");
+      big.width=Math.round(W*k); big.height=Math.round(H*k);
+      const g2=big.getContext("2d");
+      if(!g2) throw new Error("no context");
+      drawTo(g2,k,true);
+
+      if(Math.round(W*k)!==outW){
+        /* supersampled: resolve down to the requested size */
+        out=document.createElement("canvas");
+        out.width=outW; out.height=outH;
+        const o=out.getContext("2d");
+        o.imageSmoothingEnabled=true; o.imageSmoothingQuality="high";
+        o.drawImage(big,0,0,big.width,big.height,0,0,outW,outH);
+        big.width=0; big.height=0; big=null;
+      }else{
+        out=big; big=null;
+      }
+      return out;
+    }catch(err){
+      if(big){ big.width=0; big.height=0; }
+      if(out){ out.width=0; out.height=0; }
+      return null;
+    }
+  }
+
+  requestAnimationFrame(function(){ requestAnimationFrame(function(){
+    let canvasOut=null;
+    for(let li=0; li<ladder.length && !canvasOut; li++) canvasOut=attempt(ladder[li]);
+    if(!canvasOut && mul>1){
+      showError("Not enough memory for "+outW+" × "+outH+". Try a smaller export size.");
+      finish(); return;
+    }
+    if(!canvasOut){ showError("Export failed. Reload the page and try again."); finish(); return; }
+
+    function cleanup(){ canvasOut.width=0; canvasOut.height=0; }
+    function fallback(){
+      try{
+        if(mul>2){ cleanup(); finish();
+          showError("Couldn't package that size here. Export at 4K or 1080p instead."); return; }
+        const url=canvasOut.toDataURL("image/png");
+        cleanup(); save(url);
+      }catch(err){
+        cleanup(); finish();
+        showError("Export failed at that size. Try a smaller one.");
+      }
+    }
+    try{
+      canvasOut.toBlob(function(blob){
+        if(!blob) return fallback();
+        cleanup(); save(blob);
+      },"image/png");
+    }catch(err){ fallback(); }
+  });});
+};
+
+/* ------------------------------ wiring ---------------------------------- */
+document.querySelectorAll("[data-z]").forEach(function(b){
+  b.onclick=function(){
+    S.zoom=Math.min(6,Math.max(0.2,+(S.zoom+parseFloat(b.dataset.z)).toFixed(4)));
+    update();
+  };
+});
+document.querySelectorAll("[data-n]").forEach(function(b){
+  b.onclick=function(){
+    const p=b.dataset.n.split(",");
+    S.offX+=parseInt(p[0],10); S.offY+=parseInt(p[1],10);
+    update();
+  };
+});
+$("centreBtn").onclick=function(){ S.offX=0; S.offY=0; refreshHints(); draw(); };
+$("fitBtn").onclick=function(){ S.fitMode="fit"; S.zoom=1; S.offX=0; S.offY=0; refreshHints(); draw(); };
+$("fillBtn").onclick=function(){ S.fitMode="fill"; S.zoom=1; S.offX=0; S.offY=0; refreshHints(); draw(); };
+$("resetBtn").onclick=function(){
+  S.zoom=1; S.offX=0; S.offY=0; S.crop={l:0,r:0,t:0,b:0}; S.fitMode="fit";
+  syncEdges(); refreshHints(); draw();
+};
+$("removeBtn").onclick=function(){
+  releasePyr();
+  S.img=null; S.imgFull=null; S.hasImage=false; S.imgW=0; S.imgH=0; S.fullW=0; S.fullH=0;
+  S.zoom=1; S.offX=0; S.offY=0; S.crop={l:0,r:0,t:0,b:0}; S.fitMode="fit";
+  $("drop").style.display="grid"; resetDropText();
+  $("result").classList.remove("on");
+  $("exportBtn").disabled=true;
+  $("removeSec").style.display="none";
+  $("zoomSlider").dataset.off="1";
+  cv.style.cursor="default";
+  syncEdges(); refreshHints(); draw();
+};
+$("tfInput").oninput=function(){
+  S.timeframe=$("tfInput").value.slice(0,6).toUpperCase();
+  buildChips(); draw();
+};
+$("markChk").onchange=function(){ S.showMark=$("markChk").checked; draw(); };
+/* ---- the corner badge ---------------------------------------------------
+   Held as an Image at its natural size and never pre-scaled. drawTo fits it
+   into the badge at draw time, so the preview and an 8K export are the same
+   code path at different resolutions rather than two renderers to keep in
+   step. */
+function setLogo(im){
+  S.logo=im; S.logoW=im?im.naturalWidth:0; S.logoH=im?im.naturalHeight:0;
+  $("logoClear").style.display=im?"inline-flex":"none";
+  $("logoSizeWrap").style.display=im?"block":"none";
+  $("logoHint").textContent=im?(S.logoW+" × "+S.logoH):"None";
+  if(im) refreshHints();
+  draw();
+}
+$("logoBtn").onclick=function(){ $("logoFile").click(); };
+$("logoFile").onchange=function(e){
+  const f=e.target.files&&e.target.files[0];
+  e.target.value="";
+  if(!f) return;
+  if(f.type && f.type.indexOf("image/")!==0){
+    showError("That file isn't an image. Use a PNG, JPG or WebP.");
+    return;
+  }
+  showError("");
+  const reader=new FileReader();
+  reader.onerror=function(){ showError("Couldn't read that file. Try saving it as PNG."); };
+  reader.onload=function(){
+    const im=new Image();
+    im.onload=function(){
+      if(!(im.naturalWidth>0)||!(im.naturalHeight>0)){
+        showError("That image has no size to draw."); return;
+      }
+      setLogo(im);
+    };
+    im.onerror=function(){ showError("That image didn't decode. Save it as PNG or JPG and try again."); };
+    im.src=reader.result;
+  };
+  reader.readAsDataURL(f);
+};
+$("logoClear").onclick=function(){ setLogo(null); };
+
+$("handleInput").oninput=function(){
+  S.handle=$("handleInput").value.slice(0,20);
+  draw();
+};
+$("bgPicker").oninput=function(){ applyBg($("bgPicker").value); };
+$("bgHex").oninput=function(){
+  const el=$("bgHex"), v=el.value.trim();
+  const ok=applyBg(v.charAt(0)==="#"?v:"#"+v,true);
+  el.classList.toggle("bad",!ok && v!=="" && v!=="#");
+};
+$("bgHex").onblur=function(){
+  $("bgHex").classList.remove("bad");
+  $("bgHex").value=S.bg.toUpperCase();
+};
+$("bgReset").onclick=function(){ applyBg(BG_DEFAULT); };
+
+const zoomSlider=makeSlider($("zoomSlider"),{
+  min:20,max:400,step:0.1,
+  get:function(){return Math.min(400,Math.max(20,S.zoom*100));},
+  set:function(v){ S.zoom=v/100; update(); }
+});
+/* 55 to 130, not 80 to 120.
+ *
+ * The old range was the bug behind "it only reduces a little bit when the whole
+ * slider is finished": dragging the thing end to end moved the overlay by a
+ * fifth, so most of the travel was doing nothing you could see and the far left
+ * still looked like the default. Down to 55 the labels genuinely get out of the
+ * chart's way, which is what the control is for. */
+makeSlider($("uiSlider"),{
+  min:55,max:130,step:1,
+  get:function(){return S.ui*100;},
+  set:function(v){ S.ui=v/100; update(); }
+});
+makeSlider($("tintSlider"),{
+  min:-100,max:100,step:1,
+  get:function(){return S.tint;},
+  set:function(v){ S.tint=v; update(); }
+});
+makeSlider($("fadeSlider"),{
+  min:0,max:100,step:1,
+  get:function(){return S.fade;},
+  set:function(v){ S.fade=v; update(); }
+});
+makeSlider($("logoSizeSlider"),{
+  min:50,max:400,step:1,
+  get:function(){return S.logoScale*100;},
+  set:function(v){ S.logoScale=v/100; update(); }
+});
+
+if(EMBEDDED){
+  document.body.classList.add("embedded");
+  /* some hosts size the frame from a posted height; harmless if ignored */
+  const report=function(){
+    try{ parent.postMessage({type:"resize",height:document.documentElement.scrollHeight},"*"); }catch(e){}
+  };
+  if(window.ResizeObserver) new ResizeObserver(report).observe(document.body);
+  window.addEventListener("load",report);
+}
+
+buildChips();
+buildRail();
+buildExport();
+buildEdges();
+buildBackdrops();
+$("bgHex").value=S.bg.toUpperCase();
+$("tfInput").value=S.timeframe;
+$("handleInput").value=S.handle;
+refreshHints();
+draw();
+
+/* redraw once webfonts land so canvas text uses Inter/Poppins */
+if(document.fonts && document.fonts.ready){
+  Promise.all([
+    document.fonts.load("600 30px Inter"),
+    document.fonts.load("800 30px Inter"),
+    document.fonts.load("400 30px Poppins"),
+    document.fonts.load("600 30px Poppins"),
+    document.fonts.load("700 30px Poppins")
+  ]).catch(function(){}).then(function(){
+    return document.fonts.ready;
+  }).then(function(){ draw(); }).catch(function(){});
+}
+</script>
+</body>
+</html>

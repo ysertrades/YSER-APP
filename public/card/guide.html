@@ -1,0 +1,2420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Trades card editor — Field guide</title>
+<style>*,*::before,*::after{box-sizing:border-box}html,body{margin:0;padding:0}</style>
+</head>
+<body>
+<!-- Where the card's edge used to say "this is one slide of several", a hairline
+     across the top says it instead. It is the only chrome above the fold. -->
+<div class="progress" aria-hidden="true"><i id="progressBar"></i></div>
+<div class="deck" id="deck">
+
+  <!-- The drifting field. Two things about where it sits.
+
+       WHY IT EXISTS: the panels are translucent black over a flat ground, and
+       backdrop-filter over a flat ground does NOTHING. With nothing behind them
+       to blur, "glass" cards are just dark boxes. The dots are what the blur
+       has to work on — they are what makes the same CSS read as glass here as
+       it does on the Sessions tab.
+
+       WHY IT IS IN HERE: it used to be a position:fixed canvas at body level,
+       which made it a separate compositing layer competing with the slide
+       fading above it, and iOS reorders fixed layers more eagerly than anything
+       else on a page. Every z-index written out there was a REQUEST that the
+       field stay behind the card, and being refused for one frame is exactly
+       what "they jump in front of the slide card and go back" is. In here the
+       field and the slides are siblings in the deck's own stacking context,
+       ordered 0 before 1 — and painting order inside a stacking context is not
+       the compositor's to reinterpret. -->
+  <canvas class="field" id="field" aria-hidden="true" role="presentation"></canvas>
+
+  <!-- ═══════════════════ COVER · THE RULE ═══════════════════ -->
+  <!-- Identity and argument on one slide. The hero card is not decoration here:
+       it is the live proof of the claim underneath it, so separating the two put
+       a swipe between a promise and its evidence. -->
+  <section class="slide" data-title="Cover">
+    <div class="inner">
+      <article class="panel cover">
+
+        <div class="covergrid">
+          <div class="cover-l">
+            <header class="head">
+              <div class="eyebrow">
+                <span class="kicker">Field guide</span><span class="rule"></span>
+              </div>
+              <h1>Trades&nbsp;card editor</h1>
+              <p class="lead">One HTML file that turns a raw chart screenshot into a clean
+                1920&nbsp;×&nbsp;1080 trade card — session tabs, symbol badge, timeframe pill,
+                wordmark and your own corner badge — and exports it at up to
+                5760&nbsp;×&nbsp;3240.</p>
+            </header>
+
+            <div class="facts">
+              <div class="fact"><b>1</b><span>file</span></div>
+              <div class="fact"><b>0</b><span>dependencies</span></div>
+              <div class="fact"><b>0</b><span>servers</span></div>
+              <div class="fact"><b>0</b><span>bytes uploaded</span></div>
+            </div>
+
+            <p class="navhint">Arrow keys, or the dots below, move through the guide.</p>
+          </div>
+
+          <figure class="cardfig">
+            <canvas id="hero" width="1920" height="1080" aria-label="Live preview of a trade card: a candlestick chart with session tabs, symbol badge, timeframe pill and wordmark drawn over it"></canvas>
+            <figcaption>
+              <div class="ctl">
+                <span class="ctl-lab">Symbol</span>
+                <div class="chips" id="heroSym"></div>
+              </div>
+              <div class="ctl">
+                <span class="ctl-lab">Session</span>
+                <div class="chips" id="heroSess"></div>
+              </div>
+              <div class="ctl">
+                <span class="ctl-lab">Logo</span>
+                <div class="chips" id="heroLogo"></div>
+              </div>
+            </figcaption>
+          </figure>
+        </div>
+
+        <div class="act"><span class="tag">Why</span><span class="kicker">it can promise that</span><span class="rule"></span></div>
+
+        <div class="two">
+          <div class="col">
+            <h2>The preview canvas <em>is</em> the export canvas</h2>
+            <p>Most editors keep a fast preview and a separate render path for the final
+              file. The two drift — a label lands a pixel left, a shadow renders heavier,
+              and the download never quite matches what you framed.</p>
+            <p>Here the on-screen canvas is declared at <code>1920 × 1080</code> and the
+              export reads that same composition back. There is no second render path that
+              can disagree with the first, so the downloaded PNG is the thing you looked at.</p>
+          </div>
+
+          <div class="col">
+            <div class="note">
+              <span class="note-lab">Good to know</span>
+              <p>The <em>composition</em> is always 1920 × 1080 — a fixed 16:9 frame. Export
+                quality changes how many pixels that composition is rasterised into, never
+                how it is laid out. A card framed at 1080p and a card framed at 6K are the
+                same card.</p>
+            </div>
+
+            <div class="strip">
+              <span class="strip-lab">Privacy</span>
+              <p>No server component. Nothing is stored, no cookies are set, and no data is
+                sent anywhere. The only network request the page makes is for its two
+                webfonts.</p>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+
+  <!-- ══════════════════════════ 02 FRAME ══════════════════════════ -->
+  <section class="slide" data-title="Frame">
+    <div class="inner">
+      <article class="panel">
+        <header class="head">
+          <div class="eyebrow"><span class="num">01</span><span class="kicker">Workflow</span><span class="rule"></span></div>
+          <h2>Get it in, then <em>frame</em> it</h2>
+          <p class="sub">Framing is the part that takes the longest and matters the most.</p>
+        </header>
+
+        <div class="spec trio">
+              <div class="row">
+                <span class="lab">Three ways in</span>
+                <p><span class="k">Load screenshot</span> opens the file picker,
+                  you can drop a file anywhere on the canvas, or press
+                  <kbd>Ctrl</kbd>&thinsp;/&thinsp;<kbd>⌘</kbd> <kbd>V</kbd> anywhere on the
+                  page. Anything the browser can decode works — PNG, JPG, WebP, GIF, AVIF.</p>
+              </div>
+              <div class="row">
+                <span class="lab">What lands</span>
+                <p>The original is kept at full resolution. Past 3840&nbsp;px on the long
+                  edge a lighter working copy is built and the editor drives off that, which
+                  is why dragging a 6000&nbsp;px screenshot still feels immediate — and it
+                  costs nothing, because export reads the pixels back out of the original.</p>
+              </div>
+              <div class="row">
+                <span class="lab">And resets</span>
+                <p>Zoom to 100%, offset to centre, all four trims to zero, fit mode to
+                  <span class="k">Fit</span>. Your labels are untouched.</p>
+              </div>
+        </div>
+
+        <div class="note warn">
+          <span class="note-lab">HEIC will not load</span>
+          <p>Browsers cannot decode Apple's HEIC format. On iPhone, either take a
+            screenshot — those are always PNG — or switch the camera over in
+            <span class="k">Settings</span> → <span class="k">Camera</span> →
+            <span class="k">Formats</span> → <span class="k">Most Compatible</span>.</p>
+        </div>
+
+        <div class="act"><span class="tag">Then</span><span class="kicker">Frame it</span><span class="rule"></span></div>
+
+        <div class="two">
+          <div class="col">
+            <div class="spec">
+              <div class="row">
+                <span class="lab">Fit / Fill</span>
+                <p>Where framing starts, and <span class="k">Fit</span> to begin with.
+                  Fit shows the whole screenshot and pads the leftover edges with the card
+                  background; <span class="k">Fill</span> covers the frame edge to edge and
+                  lets the overflow crop away. Either one resets zoom and position.</p>
+              </div>
+              <div class="row">
+                <span class="lab">Zoom</span>
+                <p>Drag the slider (20–400%), or step with
+                  <span class="k">±0.1%</span> and <span class="k">±0.5%</span> for the last
+                  bit of alignment. Scroll or pinch on the canvas zooms toward the pointer
+                  and reaches 600%.</p>
+              </div>
+              <div class="row">
+                <span class="lab">Position</span>
+                <p>Drag the canvas, nudge 1&nbsp;px or 10&nbsp;px with the buttons, or use
+                  the arrow keys — <kbd>Shift</kbd> makes each press 10&nbsp;px.
+                  <span class="k">Centre</span> returns the offset to 0,&nbsp;0 without
+                  touching zoom.</p>
+              </div>
+              <div class="row">
+                <span class="lab">Reset</span>
+                <p>Zoom, position, all four trims and fit mode go back to defaults. Your
+                  screenshot and every label survive it.</p>
+              </div>
+              <div class="row">
+                <span class="lab">Remove screenshot</span>
+                <p>Clears the image and its framing, and frees the memory it was holding.
+                  Labels and overlay settings survive that too.</p>
+              </div>
+            </div>
+
+            <div class="note">
+              <span class="note-lab">Good to know</span>
+              <p>Hold <kbd>Shift</kbd> while scrolling and the zoom step drops from 2% to
+                0.2% per notch. It is the difference between hunting for an alignment and
+                landing on it.</p>
+            </div>
+          </div>
+
+          <div class="col">
+            <h3 class="h3">Trim edges</h3>
+            <p>The control that solves half candles. Zooming to hide a half-drawn candle at
+              the right edge moves everything else too. Trim works differently: it crops in
+              <em>source pixels</em>, per side, before the frame is computed — so the edge
+              goes away and the composition stays put.</p>
+            <figure class="trimfig">
+              <canvas id="trim" width="880" height="380" aria-label="Diagram: a screenshot with a partial candle at the right edge, and the same screenshot with that edge trimmed away"></canvas>
+              <figcaption>One source, read two ways. Left: the full width, half a candle
+                clipped at the edge. Right: 34&nbsp;px less of that edge, re-fitted to the
+                same frame.</figcaption>
+            </figure>
+            <div class="spec tight">
+              <div class="row">
+                <span class="lab">Controls</span>
+                <p>Each side has <span class="k">−</span>, <span class="k">+</span> and
+                  <span class="k">+10</span>, and a box you can type into. With the cursor
+                  in that box, <kbd>↑</kbd> and <kbd>↓</kbd> step the trim 1&nbsp;px —
+                  these are the only arrow keys in the editor that trim rather than move.
+                  Opposite sides cannot meet — at least 20&nbsp;px of image always
+                  survives.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════ 04 GROUND ══════════════════════════ -->
+  <section class="slide" data-title="Ground">
+    <div class="inner">
+      <article class="panel">
+        <header class="head">
+          <div class="eyebrow"><span class="num">02</span><span class="kicker">Workflow</span><span class="rule"></span></div>
+          <h2>Choose the <em>ground</em></h2>
+          <p class="sub">Every colour on the card derives from it — which is why it comes before the labels, not after.</p>
+        </header>
+
+        <p class="wide-p">Six presets, a picker and a hex field, starting at
+          <span class="k">#F5F5F5</span>. Pick anything else and every part of the overlay
+          re-derives itself rather than leaving dark type stranded on a dark card.</p>
+
+        <div class="grounds" id="grounds"></div>
+
+        <div class="spec trio">
+          <div class="row">
+            <span class="lab">Glass</span>
+            <p>Drawn <em>from</em> the background, so it keeps the same relationship to it
+              at every colour.</p>
+          </div>
+          <div class="row">
+            <span class="lab">Type</span>
+            <p>Keeps a trace of the background's hue instead of snapping to pure black or
+              white, and flips to light once the ground is dark. Every preset clears 14:1.</p>
+          </div>
+          <div class="row">
+            <span class="lab">Session pill &amp; edges</span>
+            <p>The pill inverts on dark grounds; hairlines and shadows swap with it. That is
+              what keeps a panel legible once the card goes black.</p>
+          </div>
+        </div>
+
+        <div class="act"><span class="tag">Then</span><span class="kicker">How far off it</span><span class="rule"></span></div>
+
+        <h3 class="h3">Overlay tone</h3>
+        <p class="wide-p">The control most worth learning, because a bright chart and a dark
+          chart want opposite answers. Tone moves the glass relative to the ground — up
+          toward white, or down into a soft grey. Default <span class="k">+50</span>.</p>
+
+        <div class="tones" id="tones"></div>
+
+        <p class="fine">The range is read off whichever ground you picked. Pure white is the
+          only one with no room above it — there the separation comes from below instead, so
+          the glass never dissolves into the card.</p>
+
+        <div class="two">
+          <div class="col">
+            <div class="note">
+              <span class="note-lab">Good to know</span>
+              <p>Tone moves fill <em>and</em> opacity together, and each element keeps its
+                own weight — the symbol capsule always reads stronger than the rail behind
+                it, the timeframe pill stronger than both. You cannot knock the three out of
+                balance.</p>
+            </div>
+          </div>
+
+          <div class="col">
+            <div class="spec tight">
+              <div class="row">
+                <span class="lab">Overlay size</span>
+                <p>Scales every piece of furniture together, 55–130%, from
+                  <span class="k">100%</span>. Tabs, badge, capsule, pill, corner badge and
+                  wordmark keep their proportions to each other — one number, no drift.</p>
+                <p class="fine">The bottom of that range is genuinely small. It exists because
+                  a busy chart wants the overlay to get out of the way, and a slider that only
+                  ever trims a tenth cannot do that.</p>
+              </div>
+              <div class="row">
+                <span class="lab">Two numbers</span>
+                <p>The panel reads <span class="k">55% · type 73%</span>, and it means it.
+                  The <b>footprint</b> takes the full setting. The <b>type</b> travels at 60%
+                  of that, because a label scaled to 55% on a 1080px card is four grey pixels
+                  on a phone. Boxes take whichever is larger — their own size, or what the
+                  label inside them needs — so at the bottom of the range the pill hugs its
+                  text instead of crushing it.</p>
+                <p class="fine">At exactly 100% the two agree to the pixel, so a card built
+                  before any of this looks the same as it always did.</p>
+              </div>
+              <div class="row">
+                <span class="lab">Rail width</span>
+                <p>The bottom bar answers the size slider two ways, and which one is right
+                  depends on the card rather than on the number.
+                  <span class="k">Full</span> pins it to the card — 16px off each edge,
+                  however small the furniture inside gets — so a quiet chart keeps a plinth
+                  running its whole width. <span class="k">Fitted</span> lets it draw in with
+                  everything else, at 55% covering 55% of the width it covered at 100%, so a
+                  busy chart gets the bar out of the way instead of wearing a thinner version
+                  of the same stripe.</p>
+                <p class="fine">At 100% they are the same bar to the pixel. The choice only
+                  starts to mean anything once you move off it.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Two real cards, not two diagrams. Both are drawn by drawCard — the
+             same function the hero uses — at the same 60% overlay, so the only
+             difference on screen is the one the switch makes. -->
+        <figure class="railfig">
+          <div class="railpair">
+            <div class="railone">
+              <canvas id="railFull" width="960" height="540" aria-label="A trade card at 60% overlay with the rail set to full width: the bottom bar runs the whole card, 16px off each edge, with small furniture inside it"></canvas>
+              <span class="raillab"><b>Full</b> — pinned to the card</span>
+            </div>
+            <div class="railone">
+              <canvas id="railFit" width="960" height="540" aria-label="The same card at the same 60% overlay with the rail set to fitted: the bottom bar is narrower and centred, covering 60% of the width the full one covers"></canvas>
+              <span class="raillab"><b>Fitted</b> — drawn in with the rest</span>
+            </div>
+          </div>
+          <figcaption>Same card, same 60% overlay, same everything else. <b>Full</b> keeps a
+            plinth running the whole width — a quiet chart carries it, and the small
+            furniture inside reads as deliberate. <b>Fitted</b> takes the bar down with the
+            rest of the overlay, so a busy chart gets its edges back instead of wearing a
+            thinner version of the same stripe.</figcaption>
+        </figure>
+      </article>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════ 03 LABEL ══════════════════════════ -->
+  <section class="slide" data-title="Label">
+    <div class="inner">
+      <article class="panel">
+        <header class="head">
+          <div class="eyebrow"><span class="num">03</span><span class="kicker">Workflow</span><span class="rule"></span></div>
+          <h2>Label it, then <em>sign</em> it</h2>
+          <p class="sub">Set once. All of it survives the next screenshot, so a run of cards only pays for this here.</p>
+        </header>
+
+        <div class="two wide-left">
+          <div class="col">
+            <h3 class="h3">Symbol</h3>
+            <p>Seven instruments. Every badge is drawn on the canvas rather than loaded as
+              an image — which is why they stay sharp at 6K, and why the index futures carry
+              the index size instead of the ticker. Starts on <span class="k">NQ</span>.</p>
+
+            <div class="badges" id="badges"></div>
+          </div>
+
+          <div class="col">
+            <h3 class="h3">Session</h3>
+            <p>London, New York, Asia. Whichever is active is
+              <em>always pinned to the centre</em> of the card; the other two rotate around
+              it and fade outward, so the eye lands on the one that matters.</p>
+            <figure class="tabfig">
+              <canvas id="tabs" width="900" height="150" aria-label="The three session tabs, with the active one filled dark at centre"></canvas>
+              <figcaption>
+                <label class="slid">
+                  <span>Fade</span>
+                  <input type="range" id="fade" min="0" max="100" value="100" aria-label="Session fade amount">
+                  <output id="fadeOut">100%</output>
+                </label>
+              </figcaption>
+            </figure>
+            <p class="fine">Drag it. At <span class="k">0</span> the two inactive labels sit
+              flat grey; raising it dissolves each one toward its outer end, away from the
+              centre.</p>
+
+            <h3 class="h3">Timeframe</h3>
+            <p>Ten presets, or type up to six characters — uppercased as you go. It lands in
+              the pill above the rail <em>and</em> in the exported filename.</p>
+            <div class="tfs">
+              <span class="k">M1</span><span class="k">M3</span><span class="k">M5</span>
+              <span class="k">M15</span><span class="k">M30</span><span class="k">H1</span>
+              <span class="k on">H4</span><span class="k">H6</span><span class="k">D1</span>
+              <span class="k">W1</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="act"><span class="tag">Then</span><span class="kicker">Sign it</span><span class="rule"></span></div>
+
+        <div class="two">
+          <div class="col">
+            <div class="spec tight">
+              <div class="row">
+                <span class="lab">Logo</span>
+                <p><span class="k">X</span> or <span class="k">Instagram</span>, both drawn
+                  as vectors at export time, so neither softens at 6K.</p>
+              </div>
+              <div class="row">
+                <span class="lab">Username</span>
+                <p>Up to 20 characters, case preserved — unlike the timeframe field — so a
+                  handle like <span class="k">yser.trades</span> stays lowercase.</p>
+              </div>
+              <div class="row">
+                <span class="lab">Show on card</span>
+                <p>Hides the wordmark. The rail, badge and pill are untouched.</p>
+              </div>
+              <div class="row">
+                <span class="lab">Corner badge</span>
+                <p>Upload your own image and it sits at the <b>right end of the bottom
+                  rail</b>, opposite the symbol and exactly its size — the two ends of the
+                  bar become a matched pair. Fitted inside the square rather than cropped to
+                  fill it, so a wide mark stays wide and none of it is lost. Transparent PNG
+                  sits best. <span class="k">Remove</span> takes it off again.</p>
+              </div>
+            </div>
+
+            <div class="note">
+              <span class="note-lab">Good to know</span>
+              <p>Clear the username entirely and the logo centres on its own, rather than
+                leaving a dangling slash. A bare mark is often the cleaner signature.</p>
+            </div>
+            <div class="note">
+              <span class="note-lab">The badge is kept at full size</span>
+              <p>The uploaded image is held at its original resolution and redrawn from that
+                at every export, the same way your screenshot is. Upload it large — a 512px
+                mark carries a 6K card, a 64px favicon will not.</p>
+            </div>
+          </div>
+
+          <div class="col">
+            <figure class="markfig">
+              <canvas id="marks" width="880" height="300" aria-label="The X mark and the Instagram mark side by side over a coloured band, showing that the Instagram outline lets the band show through"></canvas>
+              <figcaption id="marksCap">The X is a solid glyph. The Instagram mark is deliberately not —
+                it is stroked, so the chart carries on through the squircle and the lens.
+                Both render in the card's ink, not brand colour, so the signature stays part
+                of the card instead of competing with it.</figcaption>
+            </figure>
+
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+
+
+  <!-- ══════════════════════════ 06 EXPORT ══════════════════════════ -->
+  <section class="slide" data-title="Export">
+    <div class="inner">
+      <article class="panel">
+        <header class="head">
+          <div class="eyebrow"><span class="num">04</span><span class="kicker">Workflow</span><span class="rule"></span></div>
+          <h2>Nothing is <em>upscaled</em></h2>
+          <p class="sub">Lossless PNG. Three sizes. Every one redrawn at its own resolution, never stretched.</p>
+        </header>
+
+        <div class="sizes">
+          <div class="size"><b>1080p</b><span>1920 × 1080</span><small>Drawn at 3840, resolved down</small></div>
+          <div class="size on"><b>4K</b><span>3840 × 2160</span><small>Drawn at 7680 · default</small></div>
+          <div class="size"><b>6K</b><span>5760 × 3240</span><small>Drawn at 11520</small></div>
+        </div>
+
+        <div class="two">
+          <div class="col">
+            <h3 class="h3">What actually happens at 6K</h3>
+            <p>Every label, badge and panel is drawn again at the output size rather than
+              stretched from the preview, and the image pixels come from your original
+              screenshot, not the editing copy.</p>
+            <p>Each size is also rendered at twice its own width and resolved back down,
+              which is what actually smooths the curve of a badge and the edge of the type.
+              <b>Every</b> size gets that full double pass — picking the biggest one no
+              longer trades edge quality for pixels.</p>
+            <p class="fine">If the device refuses a canvas that large the export steps down
+              its own quality — one and a half times, then a plain native redraw — rather
+              than giving up. You get the best pass the phone in your hand can actually
+              hold, and the file either way.</p>
+
+            <div class="note warn">
+              <span class="note-lab">Your screenshot is the ceiling</span>
+              <p>That cleans up the overlay, not the chart. A 1080p screenshot exported at
+                6K gives crisp badges over a chart with no more detail than it started
+                with. Grab the source large and the big sizes pay off.</p>
+            </div>
+            <div class="note">
+              <span class="note-lab">Filenames</span>
+              <p>Exports name themselves from what is on the card:
+                <code>NQ-NewYork-H4-3840x2160.png</code>. Sort a folder of them and they
+                group by instrument on their own.</p>
+            </div>
+          </div>
+
+          <div class="col">
+            <h3 class="h3">Getting the file out</h3>
+            <p>A download fires automatically, then a bar appears with a thumbnail and
+              three routes. This is deliberate: inside an embedded frame a plain download
+              can be blocked by the host's sandbox, and at least one of these always works.</p>
+            <div class="spec tight">
+              <div class="row"><span class="lab">Download</span><p>Fires the download again, by hand.</p></div>
+              <div class="row"><span class="lab">Share</span><p>The native share sheet. Appears only where the device supports sharing files — mostly phones.</p></div>
+              <div class="row"><span class="lab">Open in tab</span><p>Opens the PNG on its own so you can save it manually. The universal fallback.</p></div>
+            </div>
+            <p class="fine">If a device cannot allocate a canvas that large, the export
+              steps down and tells you to pick a smaller size rather than failing silently.</p>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+
+
+  <!-- ══════════════════════════ KEYS ══════════════════════════ -->
+  <section class="slide" data-title="Keys">
+    <div class="inner">
+      <article class="panel">
+        <header class="head">
+          <div class="eyebrow"><span class="tag">Reference</span><span class="kicker">Input</span><span class="rule"></span></div>
+          <h2>Without touching the <em>panel</em></h2>
+          <p class="sub">Every key, every gesture — and the one exception that trims instead of moves.</p>
+        </header>
+
+        <div class="two">
+          <div class="col">
+            <h3 class="h3">Keyboard</h3>
+            <table class="keys">
+              <tbody>
+                <tr><td><kbd>Ctrl</kbd>&thinsp;/&thinsp;<kbd>⌘</kbd> <kbd>V</kbd></td><td>Paste a screenshot from the clipboard</td></tr>
+                <tr><td><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></td><td>Move the image 1&nbsp;px. They move it — they never trim.</td></tr>
+                <tr><td><kbd>Shift</kbd> + arrow</td><td>Move 10&nbsp;px</td></tr>
+                <tr><td><kbd>Shift</kbd> + scroll</td><td>Fine zoom — 0.2% a notch instead of 2%</td></tr>
+                <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <span class="fine">in a trim box</span></td><td>Step that side's trim 1&nbsp;px. The one exception below.</td></tr>
+              </tbody>
+            </table>
+            <p class="fine">While the cursor is in a field the arrows stop moving the frame,
+              so typing a custom timeframe or a username never shifts your screenshot. The
+              four trim boxes are the exception, and only because they hold numbers:
+              <kbd>↑</kbd> and <kbd>↓</kbd> there step that edge 1&nbsp;px, and
+              <kbd>Shift</kbd> makes no difference — it is still 1. Click off the box and
+              the arrows go back to moving the image.</p>
+          </div>
+
+          <div class="col">
+            <h3 class="h3">Pointer &amp; touch</h3>
+            <table class="keys">
+              <tbody>
+                <tr><td>Drag</td><td>Move the image inside the frame</td></tr>
+                <tr><td>Scroll</td><td>Zoom toward the cursor</td></tr>
+                <tr><td>Pinch</td><td>Zoom toward the midpoint of both fingers</td></tr>
+                <tr><td>Drop</td><td>Load a file dropped on the canvas</td></tr>
+              </tbody>
+            </table>
+            <div class="note">
+              <span class="note-lab">Good to know</span>
+              <p>Lift one finger mid-pinch and the gesture becomes a drag from exactly where
+                that finger sits — no jump. Zoom and pan are one continuous motion.</p>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════ RECIPE ══════════════════════════ -->
+  <section class="slide" data-title="Recipe">
+    <div class="inner">
+      <article class="panel">
+        <header class="head">
+          <div class="eyebrow"><span class="tag">Close</span><span class="rule"></span></div>
+          <h2>The <em>sixty-second</em> card</h2>
+          <p class="sub">Once it is muscle memory, this is the whole loop.</p>
+        </header>
+
+        <ol class="recipe">
+          <li><b>Snip the chart</b><span><kbd>Ctrl</kbd>&thinsp;/&thinsp;<kbd>⌘</kbd> <kbd>Shift</kbd> <kbd>S</kbd> on TradingView copies the
+            chart straight to the clipboard. Or snip with the OS — <span class="kg"><kbd>Win</kbd> <kbd>Shift</kbd> <kbd>S</kbd></span>,
+            or <span class="kg"><kbd>⌘</kbd> <kbd>Shift</kbd> <kbd>4</kbd></span> on a Mac. Windows puts that on the clipboard;
+            a Mac saves it to the desktop unless you add <kbd>Ctrl</kbd>.</span></li>
+          <li><b>Paste</b><span><kbd>Ctrl</kbd>&thinsp;/&thinsp;<kbd>⌘</kbd> <kbd>V</kbd> anywhere on the page.</span></li>
+          <li><b>Fill, then trim</b><span>Hit <span class="k">Fill</span>, then trim the edge with the half candle. Two clicks, no drift.</span></li>
+          <li><b>Set the ground</b><span>Bright chart, push tone negative. Dark chart, leave it lifted. Every overlay colour follows from here.</span></li>
+          <li><b>Set the labels</b><span>Symbol, session, timeframe — and your logo, handle and corner badge, once. All of it persists between screenshots.</span></li>
+          <li><b>Export</b><span>4K is the default and the right answer almost always.</span></li>
+        </ol>
+
+        <div class="strip end">
+          <span class="strip-lab">Remember</span>
+          <p>What you see in the preview is the file. If the card looks right on screen,
+            it is right in the download — there is no second render that can disagree.</p>
+        </div>
+      </article>
+    </div>
+  </section>
+
+</div>
+
+<nav class="nav" aria-label="Slide navigation">
+  <!-- Two ways out, one shown at a time. Framed by the shell, the button hands
+       control back to it; standing alone, the link goes to the editor. -->
+  <button type="button" class="navback" id="back" aria-label="Leave the guide" hidden>
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+    <span>Back</span>
+  </button>
+  <a class="navback" id="home" href="index.html" aria-label="Back to the editor" title="Back to the editor" hidden>
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+    <span>Editor</span>
+  </a>
+  <button class="navbtn" id="prev" aria-label="Previous slide">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+  </button>
+  <div class="dots" id="dots" role="tablist" aria-label="Slides"></div>
+  <button class="navbtn" id="next" aria-label="Next slide">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+  </button>
+  <span class="count"><b id="cur">1</b>&thinsp;/&thinsp;<span id="tot">7</span></span>
+</nav>
+
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   TOKENS — colours lifted from index.html's own constants:
+   #46443f active session tab · #1f9bf0 NQ badge · #f2b705 GC badge
+   #f5f5f5 card background · rgba(0,0,0,0.055) glass hairline
+═══════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════
+   ONE VISUAL WORLD — midnight, with amber.
+
+   Flat colour throughout: nothing sits behind the cards but the
+   ground. The ground is a deep midnight void; the cards are the
+   editor's own Midnight preset (#0f1116) lifted a step above it, so
+   they read as surfaces without ever stopping being dark.
+
+   The accent is amber, which is not a decorative choice — a trading
+   terminal has been amber on black since the 1980s, and it is also
+   the editor's own GC gold. It is the single warm note against a
+   cool dark, and everything else stays quiet. A coral carries
+   warnings so they never read as the accent.
+═══════════════════════════════════════════════════════════════ */
+:root{
+  /* The app's ground, to the value. The deck used to sit on its own deeper
+     #08090C, which was a considered colour when this file was a standalone
+     document — but it is a tab in the app now, and the calculator, the dial and
+     the editor all sit on #121212. A deck that steps two levels darker the
+     moment you open it is one surface pretending not to be part of the set.
+     Keep in step with html/body in the app's index.html. */
+  --ground:#121212;
+  --ground-2:#121212;
+
+  /* The card is translucent now, not a solid block. 0.55 is the window: any
+     more opaque and the blur has nothing to show, any less and the type loses
+     contrast against whatever pool it happens to be sitting over. */
+  --glass:rgba(20,24,33,.55);
+  --glass-solid:#141821;         /* the same card with no backdrop-filter */
+  --glass-2:rgba(255,255,255,.055);
+  --hair:rgba(255,255,255,.09);
+  --hair-2:rgba(255,255,255,.085);
+  --edge:rgba(255,255,255,.08);  /* light along the card's top edge */
+
+  --ink:#e9edf4;
+  --ink-2:#aeb8c6;
+  --ink-3:#828e9f;
+
+  --tab-bg:#e9edf4;
+  --tab-fg:#161b24;
+
+  --signal:#E9B44C;              /* amber — the one warm note, and the top-right pool */
+  --signal-fill:#f2b705;
+  --wash:rgba(232,171,66,.10);
+
+  --gold:#ef7f68;                /* coral, warnings only */
+  --gold-fill:#ef7f68;
+  --warm-wash:rgba(239,127,104,.10);
+
+  /* Negative spread pulls the shadow in under the card instead of haloing
+     around it. Large blur and Y-offset with it, so the card floats well above
+     the page rather than being stuck to it. */
+  --shade:0 32px 70px -28px rgba(0,0,0,.9);
+  --shade-sm:0 2px 12px rgba(0,0,0,.5);
+
+  /* The floating nav's footprint. --nav-clear is scroll padding at the foot of
+     every slide: content passes under the pill all the way down and only comes
+     to rest clear of it at the very end. Not a reserved band — the deck still
+     owns the full height. */
+  --nav-gap:14px;
+  --nav-h:44px;
+  --nav-clear:calc(var(--nav-gap) + var(--nav-h) + 24px + env(safe-area-inset-bottom, 0px));
+
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+}
+
+/* ═══════════════════════ FRAME ═══════════════════════ */
+/* Column layout: the deck takes the space that is left and the nav sits below
+   it in flow, so the pill can never come to rest on top of the reading text
+   the way a fixed bar does. */
+/* The card was never the problem — the plinth under the nav was. The nav used
+   to sit in flow as the last item of this column, so it owned a solid band at
+   the bottom that the deck could not reach into and content could not scroll
+   through. That band is what made the page feel cropped.
+
+   The nav floats now (see .nav), the deck takes the full height, and slides
+   scroll underneath a pill you can see through. */
+/* Instrument Serif, embedded rather than linked. This file is meant to be
+   droppable on its own — one document, no siblings to deploy beside it — and
+   a linked font would break that the moment guide.html moved. SIL Open Font
+   License, latin subset, ~15KB.
+   It appears in exactly one role: the emphasised word in a heading. */
+@font-face{
+  font-family:"Instrument Serif";
+  font-style:italic; font-weight:400; font-display:swap;
+  src:url(data:font/woff2;base64,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) format("woff2");
+}
+
+/* Flat. No gradient of any kind behind the deck — one colour, edge to edge.
+
+   This went three coloured pools, then a single warm bloom traced off the
+   reference, and now none. The bloom was real in that screenshot, but it read as
+   a smudge on the right of the page rather than as light, and a deck of dark
+   cards on one dark ground is quieter and lets the card's own edge do the
+   separating. There is no background-image and no background-attachment here on
+   purpose: with nothing to position, both would be dead declarations.
+
+   Anything reintroducing a gradient here should be deliberate. The card's
+   translucency composites straight onto this colour, so the ground is the card's
+   colour as much as its own. */
+body{
+  margin:0; color:var(--ink);
+  background:var(--ground);
+  font-family:var(--sans); font-size:15px; line-height:1.62;
+  -webkit-font-smoothing:antialiased; overflow:hidden;
+  height:100vh; height:100dvh;
+  display:flex; flex-direction:column;
+}
+
+/* Behind everything, and transparent — it ADDS to the ground, it does not
+   replace it. Painting its own backdrop would put a second opaque layer over
+   var(--ground), which is the separate-looking wash this file spent a round
+   getting rid of. */
+/* absolute, inside .deck — not fixed at body level. See the note on the canvas
+   itself: a fixed layer's order against the fading slide is the compositor's
+   call, a sibling's order inside a stacking context is not. .deck is
+   position:relative with a z-index, so it is that stacking context already, and
+   it fills everything below the 2px progress bar. */
+.field{
+  position:absolute; inset:0; z-index:0;
+  /* Spelled out, not left to inset:0. A canvas is a REPLACED element, and for
+     those width:auto resolves to the intrinsic size — the element's default
+     300x150 — rather than stretching between the offsets. .deck has no padding
+     so 100% is the whole of it. */
+  width:100%; height:100%;
+  display:block; pointer-events:none;
+  /* The layer is permanent, so it is never BUILT at the moment a slide starts
+     fading. Two brand-new layers being placed against each other is the frame
+     where the order comes out wrong; a layer that already exists cannot be
+     mis-ordered on creation. */
+  transform:translateZ(0);
+  will-change:transform;
+}
+
+.deck{position:relative; flex:1 1 auto; min-height:0; z-index:1;}
+
+.progress{
+  flex:none; height:2px; width:100%; z-index:6;
+  background:var(--hair-2); overflow:hidden;
+}
+.progress i{
+  display:block; height:100%; width:0;
+  background:var(--signal);
+  transition:width .32s cubic-bezier(.22,.9,.28,1);
+}
+@media (prefers-reduced-motion:reduce){ .progress i{transition:none;} }
+
+/* display:block, not flex. Centring an overflowing item with auto margins puts
+   its top above the scroll origin, where it cannot be reached — the reason a
+   long slide could not be scrolled back to its first line. .inner does the
+   centring instead, via min-height:100%, which simply stops applying once the
+   content is taller than the frame. */
+/* --nav-clear is the pill's footprint. It is scroll padding, not a reserved
+   band: content passes under the pill the whole way down and only comes to
+   rest clear of it at the very end of the scroll. */
+/* The z-index does two jobs and neither of them is decoration.
+
+   IT PUTS THE SLIDE ABOVE THE FIELD, as a sibling in the deck's stacking
+   context — field at 0, slides at 1. Ordering two siblings inside one stacking
+   context is settled by the painting algorithm and cannot be reinterpreted by
+   the compositor, which is the whole reason the canvas moved in here.
+
+   IT MAKES THE SLIDE'S OWN STACKING CONTEXT PERMANENT. Without a z-index a
+   slide is positioned with z-index:auto and has no stacking context, so its
+   descendants paint in the deck's. The moment slideFade starts, opacity drops
+   below 1 and a context comes into existence around all of them; when the
+   animation finishes it is thrown away again. Everything inside gets
+   re-parented in the paint order twice per slide change. Declaring a z-index
+   means the animation changes opacity and nothing else.
+
+   Deliberately z-index and NOT isolation:isolate, which would also give it a
+   permanent context: isolation establishes a BACKDROP ROOT, and the panel's
+   backdrop-filter inside one has nothing left to sample — the glass would stop
+   blurring the field for good. */
+.slide{
+  position:absolute; inset:0; z-index:1;
+  display:block; overflow-y:auto; overflow-x:hidden;
+  padding:20px 16px var(--nav-clear);
+  -webkit-overflow-scrolling:touch;
+  visibility:hidden; pointer-events:none; opacity:0;
+}
+@media (min-width:760px){ .slide{ padding:26px 20px var(--nav-clear); } }
+
+/* ── The handover ─────────────────────────────────────────────────────────
+   The same 0.22s ease the shell uses between tabs, so moving through the deck
+   and moving between tabs feel like one app. Before this the slide snapped to
+   full opacity and only its contents animated, which is what read as a jump:
+   the card arrived instantly and then its text caught up.
+
+   One deliberate difference from the tabs. There the incoming pane covers the
+   outgoing one, because the calculator and the editor are different worlds and
+   a moment of overlap reads as depth. Consecutive slides are the same card in
+   the same place with different words, so overlapping them reads as ghosting
+   instead — which is exactly the complaint that removed the old cross-fade.
+   The outgoing slide leaves at once and the incoming fades up from the ground.
+   Nothing is ever on top of anything else.
+
+   The slide owns the whole transition. Nothing inside it animates separately —
+   no rise, no stagger — because content that moves while the card beneath it is
+   still fading reads as two events rather than one.
+────────────────────────────────────────────────────────────────────────── */
+.slide.on{
+  visibility:visible; pointer-events:auto;
+  animation:slideFade .22s cubic-bezier(.4,0,.2,1) both;
+}
+@keyframes slideFade{ from{ opacity:0; } to{ opacity:1; } }
+
+/* Nothing moves. The panel and its children used to rise 7px into place on a
+   stagger, and against a card that is already fading in it read as the content
+   arriving separately from the card it sits on — the words settling after the
+   surface had landed. One fade, everything at once, no travel. */
+
+@media (prefers-reduced-motion:reduce){
+  /* animation:none would drop the fill that holds opacity at 1 and leave the
+     slide invisible, so it is pinned explicitly rather than merely unset. */
+  .slide.on{ animation:none; opacity:1; }
+}
+.inner{
+  min-height:100%;
+  display:flex; flex-direction:column; justify-content:center;
+  margin-inline:auto; width:100%; max-width:1120px;
+}
+
+/* ═══════════════════════ GLASS ═══════════════════════
+   The Sessions table's card, to the value. That surface is the app's .glass
+   token and nothing else — no drop shadow and no lit lip — so this is the whole
+   recipe:
+
+       background      rgba(0,0,0,.2)
+       backdrop-filter blur(7px)
+       border          0.4px solid rgba(176,176,176,.1)
+       border-radius   20px
+
+   Sizes, padding, type and layout are untouched; only the surface changed.
+
+   The blur is carried for fidelity rather than for effect. This deck's ground
+   is flat, and a Gaussian blur of a flat colour returns that colour — measured
+   earlier on this same card at a maximum delta of 3 out of 765. It is here so
+   the two surfaces are the same declaration rather than the same appearance by
+   coincidence, and at 7px it costs a fraction of the 30px version that was
+   removed. */
+.panel{
+  position:relative;
+  background:rgba(0,0,0,.2);
+  backdrop-filter:blur(7px);
+  -webkit-backdrop-filter:blur(7px);
+  border:0.4px solid rgba(176,176,176,.1);
+  border-radius:20px;
+  padding:clamp(20px,3.4vw,46px);
+  display:flex; flex-direction:column; gap:clamp(16px,2.1vw,26px);
+  overflow:hidden;
+}
+
+/* ═══════════════════════ TYPE ═══════════════════════ */
+.head{display:flex; flex-direction:column; gap:9px;}
+.eyebrow{display:flex; align-items:center; gap:13px;}
+
+/* Two slides carry two acts each — label then sign, ground then tone. This is
+   the eyebrow again, set mid-panel above a hairline, so the second half
+   announces itself in the deck's existing voice instead of arriving as a wall.
+   No new tokens: it borrows .tag, .kicker and .rule unchanged. */
+.act{
+  display:flex; align-items:center; gap:13px;
+  padding-top:clamp(6px,1.2vw,14px); border-top:1px solid var(--hair-2);
+}
+.num{
+  font-family:var(--mono); font-size:12px; font-weight:600;
+  letter-spacing:.22em; color:var(--signal);
+  font-variant-numeric:tabular-nums;
+}
+.tag{
+  font-family:var(--mono); font-size:10.5px; font-weight:600;
+  letter-spacing:.16em; text-transform:uppercase; color:var(--signal);
+}
+.kicker{
+  font-family:var(--mono); font-size:10.5px; font-weight:500;
+  letter-spacing:.16em; text-transform:uppercase; color:var(--ink-3);
+  white-space:nowrap;
+}
+.rule{flex:1; height:1px; background:var(--hair); min-width:16px;}
+
+h1{
+  margin:0; font-size:clamp(34px,6vw,62px); font-weight:800;
+  letter-spacing:-.038em; line-height:1.02; text-wrap:balance;
+}
+h2{
+  margin:0; font-size:clamp(25px,3.7vw,40px); font-weight:800;
+  letter-spacing:-.032em; line-height:1.08; text-wrap:balance;
+}
+/* One word per heading, at most, and only where the word IS the argument:
+   "is" on the identity of the two canvases, "ground" where the term is
+   being introduced, "sixty-second" where the claim is the time. A serif
+   italic among mono and sans reads as a change of voice, which is only
+   worth spending where the sentence actually changes voice.
+   1.12em because a serif italic sets optically smaller than the sans it
+   sits in at the same nominal size. */
+h1 em, h2 em{
+  font-family:"Instrument Serif", Georgia, "Times New Roman", serif;
+  font-style:italic; font-weight:400;
+  /* The 1.12em bump is not optional: at a matched size a serif italic looks
+     shrunken beside a 600-weight sans, and ~12% makes them read as equals. */
+  font-size:1.12em; letter-spacing:-.01em;
+  color:var(--signal);
+}
+.h3{
+  margin:0 0 -6px; font-size:12px; font-weight:700;
+  font-family:var(--mono); letter-spacing:.11em; text-transform:uppercase;
+  color:var(--ink);
+}
+.lead{
+  margin:6px 0 0; font-size:clamp(15.5px,1.55vw,18.5px); line-height:1.55;
+  color:var(--ink-2); max-width:62ch; text-wrap:pretty;
+}
+.sub{
+  margin:0; font-family:var(--mono); font-size:13px; line-height:1.5;
+  color:var(--ink-3); max-width:70ch;
+}
+p{margin:0; max-width:66ch; color:var(--ink-2); text-wrap:pretty;}
+.wide-p{max-width:none;}
+.fine{font-size:13.5px; color:var(--ink-3);}
+em{font-style:italic;}
+b{font-weight:700; color:var(--ink);}
+
+code{
+  font-family:var(--mono); font-size:.88em; color:var(--ink);
+  background:var(--glass-2); border:1px solid var(--hair-2);
+  border-radius:5px; padding:1.5px 5px;
+}
+pre{
+  margin:0; padding:13px 15px; border-radius:12px;
+  background:var(--glass-2); border:1px solid var(--hair-2);
+  overflow-x:auto;
+}
+pre code{background:none; border:0; padding:0; font-size:12.5px; line-height:1.75; color:var(--ink-2);}
+
+/* Inline, not inline-block, with the decoration cloned onto each line box:
+   a long value like a Settings path wraps inside the panel and keeps its
+   border on both halves instead of running off the edge. */
+.k{
+  display:inline; font-family:var(--mono); font-size:11.5px;
+  line-height:1.5; padding:1px 7px; border-radius:6px;
+  border:1px solid var(--hair); color:var(--ink);
+  background:var(--glass-2);
+  -webkit-box-decoration-break:clone; box-decoration-break:clone;
+}
+kbd{
+  display:inline-block; font-family:var(--mono); font-size:11px; font-weight:600;
+  line-height:1.5; padding:2px 7px; border-radius:6px;
+  border:1px solid var(--hair); border-bottom-width:2px;
+  color:var(--ink); background:var(--glass-2); white-space:nowrap;
+  /* A chip stands 23.5px tall inside a 20.8px line box, so two chords wrapping
+     onto consecutive lines had measured 0.0px between them — bottom edge
+     touching top edge. An inline-block's margin box drives the line box, so this
+     is what separates stacked chords without loosening every line of prose that
+     has no chips in it. */
+  margin-block:4px;
+}
+/* The key tables set their own row rhythm with td padding and a hairline, and
+   every row there is a single line, so the chips need no help. */
+.keys td kbd{margin-block:0;}
+/* Holds a chord together. A key group split across a line break reads as two
+   separate shortcuts, which is exactly the kind of small lie this guide avoids. */
+.kg{white-space:nowrap;}
+
+/* ═══════════════════════ LAYOUT BLOCKS ═══════════════════════ */
+.two{display:grid; grid-template-columns:1fr; gap:clamp(20px,3vw,40px);}
+.col{display:flex; flex-direction:column; gap:16px; min-width:0;}
+@media (min-width:860px){
+  .two{grid-template-columns:1fr 1fr;}
+  .two.wide-left{grid-template-columns:1.08fr 1fr;}
+}
+
+/* spec list — the reference's field/description rhythm */
+.spec{display:grid; grid-template-columns:1fr; gap:0;}
+.spec .row{
+  display:flex; flex-direction:column; gap:5px;
+  padding:13px 0; border-top:1px solid var(--hair-2);
+}
+.spec .row:first-child{border-top:0; padding-top:0;}
+.spec.tight .row{padding:11px 0;}
+.lab{
+  font-family:var(--mono); font-size:12px; font-weight:600;
+  letter-spacing:.01em; color:var(--ink);
+}
+/* Multi-column, not grid: rows pack against the previous one instead of
+   aligning to a shared row height and leaving ragged gaps. */
+@media (min-width:860px){
+  .spec.cols2{display:block; column-count:2; column-gap:44px;}
+  .spec.cols2 .row{break-inside:avoid; border-top:1px solid var(--hair-2); padding:10px 0;}
+}
+.spec.cols2 p{font-size:14px;}
+
+/* Three peers, three columns — not CSS multi-column, which balances by height
+   and leaves one column half-empty when the middle item runs long. A grid keeps
+   the band under the four ground cards as even as the cards themselves. Every
+   row carries the hairline here, including the first, or the three would not
+   line up. */
+@media (min-width:860px){
+  .spec.trio{grid-template-columns:repeat(3,1fr); column-gap:34px;}
+  .spec.trio .row{border-top:1px solid var(--hair-2); padding:13px 0 0;}
+}
+.tfs{display:flex; flex-wrap:wrap; gap:5px;}
+.tfs .on{background:var(--tab-bg); border-color:var(--tab-bg); color:var(--tab-fg);}
+
+/* callouts */
+.note{
+  border-left:3px solid var(--signal); border-radius:0 12px 12px 0;
+  background:var(--wash); padding:13px 16px;
+  display:flex; flex-direction:column; gap:5px;
+}
+.note.warn{border-left-color:var(--gold-fill); background:var(--warm-wash);}
+.note-lab{
+  font-family:var(--mono); font-size:10px; font-weight:600;
+  letter-spacing:.17em; text-transform:uppercase; color:var(--signal);
+}
+.note.warn .note-lab{color:var(--gold);}
+.note p{font-size:13.8px; color:var(--ink-2);}
+
+.strip{
+  display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 18px;
+  padding-top:16px; border-top:1px solid var(--hair-2);
+}
+.strip-lab{
+  font-family:var(--mono); font-size:10px; font-weight:600;
+  letter-spacing:.17em; text-transform:uppercase; color:var(--ink-3);
+  flex:none;
+}
+.strip p{font-size:13.5px; color:var(--ink-3); flex:1; min-width:220px;}
+.strip.end p{color:var(--ink-2);}
+
+/* pipeline */
+.pipe{margin:0; padding:0; list-style:none; counter-reset:p; display:flex; flex-direction:column;}
+.pipe li{
+  counter-increment:p; position:relative;
+  padding:0 0 16px 34px; display:flex; flex-direction:column; gap:2px;
+}
+.pipe li::before{
+  content:counter(p,decimal-leading-zero);
+  position:absolute; left:0; top:2px;
+  font-family:var(--mono); font-size:10.5px; font-weight:600;
+  letter-spacing:.06em; color:var(--signal);
+  font-variant-numeric:tabular-nums;
+}
+.pipe li::after{
+  content:""; position:absolute; left:7px; top:19px; bottom:2px; width:1px;
+  background:var(--hair);
+}
+.pipe li:last-child{padding-bottom:0;}
+.pipe li:last-child::after{display:none;}
+.pipe b{font-size:13.5px;}
+.pipe span{font-size:13.3px; color:var(--ink-3); line-height:1.55;}
+
+/* steps / recipe */
+.steps{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:6px; color:var(--ink-2);}
+.steps li{padding-left:4px;}
+.steps li::marker{font-family:var(--mono); font-size:12px; color:var(--ink-3);}
+
+.recipe{
+  margin:0; padding:0; list-style:none; counter-reset:r;
+  display:grid; grid-template-columns:1fr; gap:0;
+}
+@media (min-width:760px){.recipe{grid-template-columns:1fr 1fr; column-gap:44px;}}
+.recipe li{
+  counter-increment:r; position:relative;
+  padding:14px 0 14px 40px; border-top:1px solid var(--hair-2);
+  display:flex; flex-direction:column; gap:3px;
+}
+.recipe li:first-child{border-top:0;}
+@media (min-width:760px){.recipe li:nth-child(2){border-top:0;}}
+.recipe li::before{
+  content:counter(r,decimal-leading-zero);
+  position:absolute; left:0; top:16px;
+  font-family:var(--mono); font-size:11px; font-weight:600;
+  color:var(--signal); font-variant-numeric:tabular-nums;
+}
+.recipe b{font-size:14.5px;}
+.recipe span{font-size:13.4px; color:var(--ink-3); line-height:1.55;}
+
+/* key tables */
+.keys{width:100%; border-collapse:collapse; font-size:13.6px;}
+.keys td{padding:10px 0; border-top:1px solid var(--hair-2); vertical-align:top; color:var(--ink-2);}
+.keys tr:first-child td{border-top:0; padding-top:0;}
+.keys td:first-child{width:44%; padding-right:16px; white-space:nowrap; color:var(--ink);}
+
+/* ═══════════════════════ COVER ═══════════════════════ */
+/* The opening slide is the identity AND the argument, so the panel stays a flex
+   column (inheriting .panel's gap) and only the masthead half is a grid. It used
+   to be `.panel.cover{display:grid}`, which left no way to put anything beneath
+   the hero card without it becoming a third grid cell. */
+.covergrid{display:grid; grid-template-columns:1fr; gap:clamp(24px,3vw,44px); align-items:center;}
+@media (min-width:920px){
+  .covergrid{grid-template-columns:1fr 1.12fr;}
+}
+.cover-l{display:flex; flex-direction:column; gap:clamp(20px,2.4vw,30px); min-width:0;}
+.navhint{
+  font-family:var(--mono); font-size:11px; letter-spacing:.05em;
+  color:var(--ink-3); max-width:none;
+}
+.cardfig{margin:0; display:flex; flex-direction:column; gap:14px; min-width:0;}
+.cardfig canvas{
+  display:block; width:100%; height:auto; border-radius:14px;
+  border:1px solid var(--hair-2); box-shadow:var(--shade-sm);
+  background:#f5f5f5;
+}
+.cardfig figcaption{display:flex; flex-wrap:wrap; gap:14px 30px;}
+.ctl{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+.ctl-lab{
+  font-family:var(--mono); font-size:10px; font-weight:600;
+  letter-spacing:.17em; text-transform:uppercase; color:var(--ink-3);
+}
+.chips{display:flex; flex-wrap:wrap; gap:5px;}
+.chip{
+  font-family:var(--mono); font-size:11.5px; font-weight:500;
+  padding:4px 10px; border-radius:8px; cursor:pointer;
+  border:1px solid var(--hair); background:var(--glass-2); color:var(--ink-2);
+  transition:background .16s ease, color .16s ease, border-color .16s ease;
+}
+.chip:hover{border-color:var(--ink-3);}
+.chip[aria-pressed="true"]{background:var(--tab-bg); border-color:var(--tab-bg); color:var(--tab-fg);}
+
+.facts{
+  display:grid; grid-template-columns:repeat(2,1fr); gap:14px;
+  padding-top:18px; border-top:1px solid var(--hair-2);
+}
+.fact{display:flex; align-items:baseline; gap:8px;}
+.fact b{font-size:26px; font-weight:800; letter-spacing:-.03em; font-variant-numeric:tabular-nums;}
+.fact span{font-family:var(--mono); font-size:11px; letter-spacing:.08em; color:var(--ink-3);}
+
+/* ═══════════════════════ FIGURES ═══════════════════════ */
+.trimfig, .tabfig, .markfig{margin:0; display:flex; flex-direction:column; gap:10px;}
+.trimfig canvas, .tabfig canvas, .markfig canvas{
+  display:block; width:100%; height:auto; border-radius:12px;
+  border:1px solid var(--hair-2); background:var(--glass-2);
+}
+.trimfig figcaption, .markfig figcaption{font-size:12.6px; color:var(--ink-3); line-height:1.5;}
+
+/* The rail-width pair. Two cards side by side on a wide screen, stacked on a
+   narrow one — a comparison you have to scroll between is not a comparison. */
+.railfig{margin:26px 0 0; display:flex; flex-direction:column; gap:12px;}
+.railpair{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+.railone{display:flex; flex-direction:column; gap:8px; min-width:0;}
+.railone canvas{
+  display:block; width:100%; height:auto; border-radius:12px;
+  border:1px solid var(--hair-2); background:var(--glass-2);
+}
+.raillab{
+  font-family:var(--mono); font-size:11px; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--ink-3);
+}
+.raillab b{color:var(--ink-2); font-weight:700;}
+.railfig figcaption{font-size:12.6px; color:var(--ink-3); line-height:1.5;}
+@media (max-width:760px){ .railpair{grid-template-columns:1fr;} }
+
+.badges{display:flex; flex-wrap:wrap; gap:10px;}
+.badge{
+  display:flex; align-items:center; gap:9px;
+  padding:7px 13px 7px 8px; border-radius:999px;
+  border:1px solid var(--hair-2); background:var(--glass-2);
+}
+.badge canvas{display:block; width:34px; height:34px;}
+.badge span{font-family:var(--mono); font-size:11.5px; font-weight:600; color:var(--ink);}
+.badge small{font-family:var(--mono); font-size:10.5px; color:var(--ink-3);}
+
+.slid{display:flex; align-items:center; gap:12px; width:100%;}
+.slid>span{
+  font-family:var(--mono); font-size:10px; font-weight:600;
+  letter-spacing:.17em; text-transform:uppercase; color:var(--ink-3); flex:none;
+}
+.slid output{
+  font-family:var(--mono); font-size:12px; color:var(--ink);
+  font-variant-numeric:tabular-nums; flex:none; width:44px; text-align:right;
+}
+input[type="range"]{
+  flex:1; min-width:0; height:22px; -webkit-appearance:none; appearance:none;
+  background:none; cursor:pointer;
+  /* horizontal belongs to the slider; vertical still scrolls the slide */
+  touch-action:pan-y;
+}
+/* A 17px handle is a mouse target, not a finger one. On touch the whole
+   control grows a proper grab area and the handle comes with it. */
+@media (pointer:coarse){
+  input[type="range"]{height:42px;}
+  input[type="range"]::-webkit-slider-runnable-track{height:7px;}
+  input[type="range"]::-moz-range-track{height:7px;}
+  input[type="range"]::-webkit-slider-thumb{width:26px; height:26px; margin-top:-10px;}
+  input[type="range"]::-moz-range-thumb{width:24px; height:24px;}
+  .slid{gap:14px;}
+}
+input[type="range"]::-webkit-slider-runnable-track{height:5px; border-radius:3px; background:var(--hair);}
+input[type="range"]::-moz-range-track{height:5px; border-radius:3px; background:var(--hair);}
+input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none; margin-top:-6px;
+  width:17px; height:17px; border-radius:50%;
+  background:var(--tab-bg); border:2px solid var(--ground); box-shadow:var(--shade-sm);
+}
+input[type="range"]::-moz-range-thumb{
+  width:15px; height:15px; border-radius:50%; border:2px solid var(--ground);
+  background:var(--tab-bg); box-shadow:var(--shade-sm);
+}
+
+.grounds{display:grid; grid-template-columns:repeat(2,1fr); gap:12px;}
+@media (min-width:820px){.grounds{grid-template-columns:repeat(4,1fr);}}
+.ground{display:flex; flex-direction:column; gap:7px; min-width:0;}
+.ground canvas{
+  display:block; width:100%; height:auto; border-radius:10px;
+  border:1px solid var(--hair-2);
+}
+.ground-h{display:flex; align-items:baseline; justify-content:space-between; gap:8px;}
+.ground b{font-size:12.5px; font-weight:700;}
+.ground i{font-family:var(--mono); font-size:10px; font-style:normal; color:var(--ink-3);}
+
+.tones{display:grid; grid-template-columns:1fr; gap:14px;}
+@media (min-width:700px){.tones{grid-template-columns:repeat(3,1fr);}}
+.tone{display:flex; flex-direction:column; gap:8px;}
+.tone canvas{
+  display:block; width:100%; height:auto; border-radius:11px;
+  border:1px solid var(--hair-2);
+}
+.tone .tone-h{display:flex; align-items:baseline; justify-content:space-between; gap:10px;}
+.tone b{font-family:var(--mono); font-size:11.5px; font-weight:700;}
+.tone i{font-family:var(--mono); font-size:10.5px; font-style:normal; color:var(--ink-3);}
+.tone p{font-size:12.8px; color:var(--ink-3); line-height:1.5;}
+
+.sizes{display:grid; grid-template-columns:repeat(2,1fr); gap:10px;}
+@media (min-width:760px){.sizes{grid-template-columns:repeat(4,1fr);}}
+.size{
+  display:flex; flex-direction:column; gap:2px;
+  padding:14px 16px; border-radius:13px;
+  border:1px solid var(--hair-2); background:var(--glass-2);
+}
+.size.on{border-color:var(--signal-fill); background:var(--wash);}
+.size b{font-size:17px; font-weight:800; letter-spacing:-.02em;}
+.size span{font-family:var(--mono); font-size:11.5px; color:var(--ink-2); font-variant-numeric:tabular-nums;}
+.size small{font-family:var(--mono); font-size:10px; letter-spacing:.06em; color:var(--ink-3); margin-top:3px;}
+.size.on small{color:var(--signal);}
+
+/* ═══════════════════════ NAV ═══════════════════════ */
+/* Floating, not standing on anything. As a flow item it owned a band at the
+   bottom of the column that the deck could not use and content could not
+   scroll through; fixed, it hovers over the deck and the slides run their full
+   height beneath it.
+
+   That is also what makes the glass real: backdrop-filter over a flat colour
+   samples a constant and does nothing, so a pill with a reserved strip under it
+   was only ever a dark chip. With the card sliding past underneath, blur(7px)
+   — the same value the editor uses — finally has something to act on.
+
+   No drop shadow. A hairline and the inset top edge carry the separation. */
+.nav{
+  position:fixed; z-index:5;
+  /* centred by auto margins rather than translateX(-50%): a transform on a
+     backdrop-filtered element is the exact combination that flashes an edge. */
+  left:0; right:0; margin-inline:auto; width:max-content;
+  bottom:calc(var(--nav-gap) + env(safe-area-inset-bottom, 0px));
+  display:flex; align-items:center; gap:5px;
+  padding:6px 8px; border-radius:999px;
+  /* The app's tab switcher, to the value — same background, same hairline,
+     same top-edge inset. The two pills are the same control in two documents
+     and now say so. Whole pixels on the border, not 0.5: a fractional border
+     lands between device pixels and shimmers while the pill is moving. */
+  background:rgba(0,0,0,.38);
+  backdrop-filter:blur(7px);
+  -webkit-backdrop-filter:blur(7px);
+  border:1px solid rgba(255,255,255,.10);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
+  max-width:calc(100vw - 24px);
+}
+
+/* The way out. Inside the shell the tab switcher hides itself while you read,
+   so this is the only exit on screen and it has to look like it: solid amber,
+   the deck's one accent, and the only filled thing in a pill of ghost buttons.
+   The label never collapses to a bare arrow — on a phone that is the
+   difference between a button and a decoration. */
+.navback{
+  display:inline-flex; align-items:center; gap:7px; flex:none;
+  height:32px; padding:0 13px 0 10px; margin-right:3px;
+  border:0; cursor:pointer;
+  border-radius:999px; background:var(--signal); color:var(--ground);
+  font-family:var(--mono); font-size:11.5px; font-weight:700; letter-spacing:.05em;
+  text-decoration:none; white-space:nowrap;
+  transition:filter .16s ease, transform .12s ease;
+}
+.navback:hover{filter:brightness(1.08);}
+.navback:active{transform:scale(.96);}
+.navback:focus-visible{outline:2px solid var(--ink); outline-offset:2px;}
+.navback[hidden]{display:none;}
+.navbtn{
+  display:grid; place-items:center; width:30px; height:30px; flex:none;
+  border-radius:50%; border:0; background:none; color:var(--ink-2); cursor:pointer;
+  transition:background .16s ease, color .16s ease;
+}
+.navbtn:hover:not(:disabled){background:var(--hair-2); color:var(--ink);}
+.navbtn:disabled{opacity:.28; cursor:default;}
+.dots{display:flex; align-items:center; gap:3px; overflow:hidden;}
+.dot{
+  width:20px; height:26px; padding:0; border:0; background:none; cursor:pointer;
+  display:grid; place-items:center;
+}
+.dot::after{
+  content:""; width:6px; height:6px; border-radius:50%;
+  background:var(--hair); transition:background .18s ease, width .22s ease, border-radius .22s ease;
+}
+.dot:hover::after{background:var(--ink-3);}
+.dot[aria-selected="true"]::after{background:var(--signal-fill); width:16px; border-radius:3px;}
+.count{
+  font-family:var(--mono); font-size:11px; color:var(--ink-3);
+  font-variant-numeric:tabular-nums; padding:0 8px 0 5px; flex:none;
+}
+.count b{color:var(--ink); font-weight:600;}
+/* Below this width the dots are dropped, which leaves the two arrows as the
+   only thing there is to tap — so they get a proper finger-sized target
+   rather than the 30px that suited a pointer. */
+@media (max-width:520px){
+  :root{--nav-h:54px;}          /* 5px padding + 44px targets + 5px */
+  .dots{display:none;}
+  .nav{padding:5px 6px; gap:2px;}
+  .navbtn{width:44px; height:44px;}
+  .navbtn svg{width:18px; height:18px;}
+  .count{font-size:12px; padding:0 10px 0 6px;}
+  .navback{height:44px; padding:0 15px 0 12px; margin-right:4px; font-size:12px;}
+}
+
+/* ═══════════════════ PHONE DENSITY ═══════════════════
+   Same content, tighter rhythm: a slide that took three screens on a phone
+   now takes closer to one and a half. */
+@media (max-width:640px){
+  body{font-size:14.5px; line-height:1.58;}
+  h1{font-size:clamp(30px,8.4vw,40px); letter-spacing:-.03em;}
+  h2{font-size:clamp(23px,6.4vw,30px); letter-spacing:-.026em;}
+  .lead{font-size:15.5px; line-height:1.5;}
+  .sub{font-size:12px;}
+  /* Radius stays 20px at every width — the Sessions table does not tighten its
+     corners on a phone, and matching it was the point. Only the gap changes. */
+  .panel{gap:15px;}
+  .two{gap:18px;}
+  .col{gap:13px;}
+  .head{gap:7px;}
+  .spec .row{padding:11px 0;}
+  .note{padding:11px 13px; border-radius:0 10px 10px 0;}
+  .note p{font-size:13.2px;}
+  .fine{font-size:12.8px;}
+  .keys{font-size:13px;}
+  .keys td{padding:9px 0;}
+  .keys td:first-child{width:auto; white-space:normal;}
+  .pipe li{padding-bottom:13px;}
+  .recipe li{padding:12px 0 12px 34px;}
+  .facts{gap:11px; padding-top:14px;}
+  .fact b{font-size:22px;}
+  .cardfig figcaption{gap:10px 18px;}
+  pre code{font-size:11.5px;}
+}
+
+:focus-visible{outline:2px solid var(--signal-fill); outline-offset:3px; border-radius:5px;}
+
+@media (prefers-reduced-motion:reduce){
+  .slide{transition:opacity .01s linear, visibility 0s;}
+  *{animation-duration:.01ms !important; transition-duration:.01ms !important;}
+}
+</style>
+
+<script>
+(function(){
+"use strict";
+
+/* ══════════════════════════════════════════════════════════════
+   Drawing primitives ported from index.html so every figure in
+   this guide is rendered by the same code the tool ships.
+══════════════════════════════════════════════════════════════ */
+var MONO = 'ui-monospace, Menlo, Consolas, monospace';
+var SANS = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+
+function rr(c,x,y,w,h,r){
+  var rad=Math.min(r,w/2,h/2);
+  c.beginPath();
+  c.moveTo(x+rad,y); c.lineTo(x+w-rad,y); c.arcTo(x+w,y,x+w,y+rad,rad);
+  c.lineTo(x+w,y+h-rad); c.arcTo(x+w,y+h,x+w-rad,y+h,rad);
+  c.lineTo(x+rad,y+h); c.arcTo(x,y+h,x,y+h-rad,rad);
+  c.lineTo(x,y+rad); c.arcTo(x,y,x+rad,y,rad); c.closePath();
+}
+function glass(c,x,y,w,h,r,o){
+  o=o||{};
+  var fill=o.fill||"rgba(252,252,252,0.62)",
+      stroke=o.stroke||"rgba(0,0,0,0.055)",
+      shadow=o.shadow!==false;
+  c.save();
+  if(shadow){c.shadowColor="rgba(0,0,0,0.055)";c.shadowBlur=20;c.shadowOffsetY=5;}
+  rr(c,x,y,w,h,r); c.fillStyle=fill; c.fill(); c.restore();
+  c.save(); rr(c,x,y,w,h,r); c.lineWidth=1.4; c.strokeStyle=stroke; c.stroke(); c.restore();
+}
+/* ---- the tool's own colour derivation, ported verbatim ---- */
+function hexRgb(h){
+  h=String(h).trim().replace(/^#/,"");
+  if(h.length===3) h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  var n=parseInt(h,16);
+  if(h.length!==6||isNaN(n)) return null;
+  return [(n>>16)&255,(n>>8)&255,n&255];
+}
+function mixTo(rgb,t,f){ return rgb.map(function(v,i){ return v+(t[i]-v)*f; }); }
+function srgbLin(c){ c/=255; return c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4); }
+function relLum(c){ return 0.2126*srgbLin(c[0])+0.7152*srgbLin(c[1])+0.0722*srgbLin(c[2]); }
+function cssc(c,a){
+  var r=Math.round(c[0]),g=Math.round(c[1]),b=Math.round(c[2]);
+  return a===undefined?"rgb("+r+","+g+","+b+")":"rgba("+r+","+g+","+b+","+a+")";
+}
+var BLACK=[0,0,0], WHITE=[255,255,255];
+function buildPalette(hex){
+  var bg=hexRgb(hex)||[245,245,245];
+  var onDark=relLum(bg)<0.42;
+  var ink=onDark?mixTo(bg,WHITE,0.92):mixTo(bg,BLACK,0.885);
+  var inkStrong=onDark?mixTo(bg,WHITE,0.96):mixTo(bg,BLACK,0.918);
+  return {
+    bg:bg, hex:cssc(bg), onDark:onDark,
+    ink:cssc(ink), inkStrong:cssc(inkStrong),
+    idleRgb:mixTo(bg,ink,0.258).map(Math.round).join(","),
+    tabBg:onDark?cssc(mixTo(bg,WHITE,0.90)):"#46443f",
+    tabFg:onDark?cssc(mixTo(bg,BLACK,0.80)):"#ffffff",
+    tabShadow:onDark?"rgba(0,0,0,0.45)":"rgba(0,0,0,0.14)",
+    stroke:onDark?"rgba(255,255,255,0.10)":"rgba(0,0,0,0.055)",
+    strokeSoft:onDark?"rgba(255,255,255,0.09)":"rgba(0,0,0,0.05)",
+    shadow:onDark?"rgba(0,0,0,0.38)":"rgba(0,0,0,0.055)"
+  };
+}
+/* Tone reads its span off the background's own headroom, which is why the
+   default lands on the original 10 up / 32 down. */
+function glassFill(pal,tint,weight){
+  var k=Math.abs(tint)/100, bg=pal.bg, up=tint>=0;
+  function room(u){ return u?255-Math.max(bg[0],bg[1],bg[2]):Math.min(bg[0],bg[1],bg[2]); }
+  var head=room(up);
+  if(head<6 && room(!up)>head){ up=!up; head=room(up); }
+  var d=(up?1:-1)*Math.min(32,head)*k;
+  var a=Math.min(0.95,(0.30+0.55*k)*weight);
+  return cssc([bg[0]+d,bg[1]+d,bg[2]+d],a.toFixed(3));
+}
+function clipCircle(c,cx,cy,r,fn){
+  c.save(); c.beginPath(); c.arc(cx,cy,r,0,Math.PI*2); c.clip(); fn(); c.restore();
+}
+function circleEdge(c,cx,cy,r){
+  c.save();
+  c.beginPath(); c.arc(cx,cy,r,0,Math.PI*2);
+  c.lineWidth=Math.max(1,r*0.07); c.strokeStyle="rgba(255,255,255,0.9)"; c.stroke();
+  c.beginPath(); c.arc(cx,cy,r,0,Math.PI*2);
+  c.lineWidth=1.2; c.strokeStyle="rgba(0,0,0,0.07)"; c.stroke();
+  c.restore();
+}
+function usFlag(c,cx,cy,r){
+  clipCircle(c,cx,cy,r,function(){
+    var x0=cx-r,y0=cy-r,s=r*2,sh=s/13,i,row,col;
+    c.fillStyle="#ffffff"; c.fillRect(x0,y0,s,s);
+    c.fillStyle="#b22234";
+    for(i=0;i<13;i+=2) c.fillRect(x0,y0+i*sh,s,sh);
+    c.fillStyle="#3c3b6e"; c.fillRect(x0,y0,s*0.5,sh*7);
+    c.fillStyle="#ffffff";
+    for(row=0;row<4;row++) for(col=0;col<4;col++){
+      c.beginPath();
+      c.arc(x0+s*0.07+col*s*0.115, y0+sh*0.9+row*sh*1.6, r*0.045,0,Math.PI*2);
+      c.fill();
+    }
+  });
+  circleEdge(c,cx,cy,r);
+}
+function euFlag(c,cx,cy,r){
+  clipCircle(c,cx,cy,r,function(){
+    var i,a;
+    c.fillStyle="#003399"; c.fillRect(cx-r,cy-r,r*2,r*2);
+    c.fillStyle="#ffcc00";
+    for(i=0;i<12;i++){
+      a=(i/12)*Math.PI*2-Math.PI/2;
+      c.beginPath();
+      c.arc(cx+Math.cos(a)*r*0.52, cy+Math.sin(a)*r*0.52, r*0.085,0,Math.PI*2);
+      c.fill();
+    }
+  });
+  circleEdge(c,cx,cy,r);
+}
+function ukFlag(c,cx,cy,r){
+  clipCircle(c,cx,cy,r,function(){
+    var x0=cx-r,y0=cy-r,s=r*2;
+    c.fillStyle="#012169"; c.fillRect(x0,y0,s,s);
+    c.save(); c.lineCap="butt";
+    c.strokeStyle="#ffffff"; c.lineWidth=s*0.2;
+    c.beginPath(); c.moveTo(x0,y0); c.lineTo(x0+s,y0+s); c.moveTo(x0+s,y0); c.lineTo(x0,y0+s); c.stroke();
+    c.strokeStyle="#c8102e"; c.lineWidth=s*0.09;
+    c.beginPath(); c.moveTo(x0,y0); c.lineTo(x0+s,y0+s); c.moveTo(x0+s,y0); c.lineTo(x0,y0+s); c.stroke();
+    c.strokeStyle="#ffffff"; c.lineWidth=s*0.28;
+    c.beginPath(); c.moveTo(cx,y0); c.lineTo(cx,y0+s); c.moveTo(x0,cy); c.lineTo(x0+s,cy); c.stroke();
+    c.strokeStyle="#c8102e"; c.lineWidth=s*0.16;
+    c.beginPath(); c.moveTo(cx,y0); c.lineTo(cx,y0+s); c.moveTo(x0,cy); c.lineTo(x0+s,cy); c.stroke();
+    c.restore();
+  });
+  circleEdge(c,cx,cy,r);
+}
+function bars(c,cx,cy,r,color){
+  c.save(); c.fillStyle=color;
+  var bw=r*0.66,bh=r*0.34,inset=bh*0.34;
+  function trap(x,y){
+    c.beginPath();
+    c.moveTo(x-bw/2,y+bh/2); c.lineTo(x+bw/2,y+bh/2);
+    c.lineTo(x+bw/2-inset,y-bh/2); c.lineTo(x-bw/2+inset,y-bh/2);
+    c.closePath(); c.fill();
+  }
+  trap(cx,cy-r*0.24); trap(cx-bw*0.54,cy+r*0.26); trap(cx+bw*0.54,cy+r*0.26);
+  c.restore();
+}
+function numberBadge(c,cx,cy,r,bg,text){
+  c.save();
+  c.beginPath(); c.arc(cx,cy,r,0,Math.PI*2); c.fillStyle=bg; c.fill();
+  c.fillStyle="#ffffff";
+  var size=r*0.86;
+  c.font="800 "+size+"px "+SANS;
+  var maxW=r*1.5, w=c.measureText(text).width;
+  if(w>maxW){ size=size*(maxW/w); c.font="800 "+size+"px "+SANS; }
+  c.textAlign="center"; c.textBaseline="middle";
+  c.fillText(text,cx,cy+size*0.04);
+  c.restore();
+  circleEdge(c,cx,cy,r);
+}
+function metalBadge(c,cx,cy,r,bg){
+  c.save(); c.beginPath(); c.arc(cx,cy,r,0,Math.PI*2); c.fillStyle=bg; c.fill(); c.restore();
+  bars(c,cx,cy,r,"#ffffff");
+  circleEdge(c,cx,cy,r);
+}
+var X_PATH="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68"+
+           "l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z";
+var xPath2D = (typeof Path2D!=="undefined") ? new Path2D(X_PATH) : null;
+function drawXMark(c,cx,cy,size,color){
+  if(!xPath2D) return;
+  c.save();
+  c.translate(cx-size/2,cy-size/2);
+  c.scale(size/24,size/24);
+  c.fillStyle=color;
+  c.fill(xPath2D);
+  c.restore();
+}
+function drawInstaMark(c,cx,cy,size,color){
+  var s=size*0.94;
+  c.save();
+  c.translate(cx-s/2,cy-s/2);
+  c.scale(s/24,s/24);
+  c.strokeStyle=color; c.fillStyle=color;
+  c.lineWidth=2.1; c.lineJoin="round"; c.lineCap="round";
+  rr(c,2,2,20,20,5.6); c.stroke();
+  c.beginPath(); c.arc(12,12,4.3,0,Math.PI*2); c.stroke();
+  c.beginPath(); c.arc(17.4,6.6,1.25,0,Math.PI*2); c.fill();
+  c.restore();
+}
+function drawMark(c,id,cx,cy,size,color){
+  if(id==="instagram") return drawInstaMark(c,cx,cy,size,color);
+  return drawXMark(c,cx,cy,size,color);
+}
+function drawSymbolIcon(c,id,cx,cy,r){
+  if(id==="NQ") return numberBadge(c,cx,cy,r,"#1f9bf0","100");
+  if(id==="ES") return numberBadge(c,cx,cy,r,"#e03131","500");
+  if(id==="YM") return numberBadge(c,cx,cy,r,"#1f9bf0","30");
+  if(id==="GC") return metalBadge(c,cx,cy,r,"#f2b705");
+  if(id==="SI") return metalBadge(c,cx,cy,r,"#b6b9bd");
+  if(id==="EURUSD"||id==="GBPUSD"){
+    var r2=r*0.72;
+    usFlag(c,cx+r*0.27,cy-r*0.27,r2);
+    (id==="EURUSD"?euFlag:ukFlag)(c,cx-r*0.24,cy+r*0.24,r2);
+  }
+}
+
+var SYMBOLS=[
+  {id:"NQ",label:"NQ",note:"Nasdaq-100"},
+  {id:"ES",label:"ES",note:"S&P 500"},
+  {id:"YM",label:"YM",note:"Dow 30"},
+  {id:"GC",label:"GC",note:"Gold"},
+  {id:"SI",label:"SI",note:"Silver"},
+  {id:"EURUSD",label:"EURUSD",note:"Euro"},
+  {id:"GBPUSD",label:"GBPUSD",note:"Sterling"}
+];
+var SESSIONS=["London","New York","Asia"];
+
+/* ══════════════════════ synthetic chart ══════════════════════ */
+function rng(seed){
+  return function(){
+    seed|=0; seed=seed+0x6D2B79F5|0;
+    var t=Math.imul(seed^seed>>>15,1|seed);
+    t=t+Math.imul(t^t>>>7,61|t)^t;
+    return ((t^t>>>14)>>>0)/4294967296;
+  };
+}
+function series(n,seed){
+  var r=rng(seed), out=[], p=100, i, o, cl, hi, lo, drift;
+  for(i=0;i<n;i++){
+    drift=Math.sin(i/13)*0.35+0.06;
+    o=p;
+    cl=o+(r()-0.5)*2.4+drift;
+    hi=Math.max(o,cl)+r()*1.1;
+    lo=Math.min(o,cl)-r()*1.1;
+    out.push({o:o,c:cl,h:hi,l:lo});
+    p=cl;
+  }
+  return out;
+}
+function drawChart(c,x,y,w,h,seed,dense){
+  var n=dense||88, data=series(n,seed), i, d;
+  var hi=-1e9, lo=1e9;
+  for(i=0;i<n;i++){ if(data[i].h>hi)hi=data[i].h; if(data[i].l<lo)lo=data[i].l; }
+  var pad=(hi-lo)*0.14; hi+=pad; lo-=pad;
+  var axisW=w*0.062, plotW=w-axisW;
+  function py(v){ return y+h-((v-lo)/(hi-lo))*h; }
+
+  c.save();
+  c.beginPath(); c.rect(x,y,w,h); c.clip();
+  c.fillStyle="#fdfdfd"; c.fillRect(x,y,w,h);
+
+  /* grid */
+  c.strokeStyle="rgba(0,0,0,0.045)"; c.lineWidth=1;
+  for(i=1;i<6;i++){
+    var gy=Math.round(y+(h/6)*i)+0.5;
+    c.beginPath(); c.moveTo(x,gy); c.lineTo(x+w,gy); c.stroke();
+  }
+  for(i=1;i<9;i++){
+    var gx=Math.round(x+(plotW/9)*i)+0.5;
+    c.beginPath(); c.moveTo(gx,y); c.lineTo(gx,y+h); c.stroke();
+  }
+
+  /* a shaded session window, because that is what the card labels */
+  var s0=x+plotW*0.46, s1=x+plotW*0.70;
+  c.fillStyle="rgba(31,155,240,0.055)"; c.fillRect(s0,y,s1-s0,h);
+  c.strokeStyle="rgba(31,155,240,0.18)"; c.setLineDash([6,6]); c.lineWidth=1.4;
+  c.beginPath(); c.moveTo(s0,y); c.lineTo(s0,y+h); c.moveTo(s1,y); c.lineTo(s1,y+h); c.stroke();
+  c.setLineDash([]);
+
+  /* candles */
+  var step=plotW/n, bw=Math.max(1.5,step*0.58);
+  for(i=0;i<n;i++){
+    d=data[i];
+    var cx=x+step*(i+0.5), up=d.c>=d.o;
+    c.strokeStyle=up?"#26a69a":"#ef5350"; c.fillStyle=up?"#26a69a":"#ef5350";
+    c.lineWidth=Math.max(1,bw*0.16);
+    c.beginPath(); c.moveTo(cx,py(d.h)); c.lineTo(cx,py(d.l)); c.stroke();
+    var top=py(Math.max(d.o,d.c)), bot=py(Math.min(d.o,d.c));
+    c.fillRect(cx-bw/2, top, bw, Math.max(1.4,bot-top));
+  }
+
+  /* last price line + axis strip */
+  var last=data[n-1].c, ly=py(last);
+  c.strokeStyle="rgba(38,166,154,0.55)"; c.setLineDash([5,5]); c.lineWidth=1.4;
+  c.beginPath(); c.moveTo(x,ly); c.lineTo(x+plotW,ly); c.stroke();
+  c.setLineDash([]);
+
+  c.fillStyle="rgba(0,0,0,0.02)"; c.fillRect(x+plotW,y,axisW,h);
+  c.strokeStyle="rgba(0,0,0,0.06)";
+  c.beginPath(); c.moveTo(x+plotW+0.5,y); c.lineTo(x+plotW+0.5,y+h); c.stroke();
+  c.fillStyle="#26a69a";
+  rr(c,x+plotW+2,ly-h*0.024,axisW-4,h*0.048,3); c.fill();
+  c.restore();
+}
+
+/* ══════════════════════ the card ══════════════════════ */
+function drawCard(c,W,H,opt){
+  var u=opt.u===undefined?1:opt.u;
+  var tint=opt.tint===undefined?50:opt.tint;
+  var fade=opt.fade===undefined?100:opt.fade;
+  var session=opt.session||"New York";
+  var P=buildPalette(opt.bg||"#f5f5f5");
+  var symbol=opt.symbol||"NQ";
+  var tf=opt.tf||"H4";
+  /* The editor's own rule, ported so this drawing cannot drift from it:
+     furniture takes the full scale, type takes 60% of its travel, and every
+     box takes whichever is larger — its own size or what its label needs. */
+  var ut=0.4+0.6*u;
+  var fit=function(scaled,fromType){ return Math.max(scaled,fromType); };
+  /* Full pins the rail to the card; fitted lets it draw in with everything
+     else. Default full, exactly as the editor defaults. */
+  var railFull=opt.railFull!==false;
+
+  c.setTransform(1,0,0,1,0,0);
+  c.clearRect(0,0,W,H);
+  c.fillStyle=P.hex; c.fillRect(0,0,W,H);
+  if(opt.chart!==false){
+    if(opt.inset){
+      /* A screenshot placed with room around it, the way Fit leaves it — which
+         is the only way a preview can show the ground colour at all. */
+      var ix=W*0.075, iy=H*0.155, iw=W*0.85, ih=H*0.55;
+      c.save(); rr(c,ix,iy,iw,ih,16); c.clip();
+      drawChart(c,ix,iy,iw,ih,opt.seed||7,46);
+      c.restore();
+    }else{
+      drawChart(c,0,0,W,H,opt.seed||7);
+    }
+  }
+
+  /* session tabs — active pinned to centre */
+  var tabPx=Math.round(24*ut);
+  var tabFont="600 "+tabPx+"px "+SANS;
+  c.font=tabFont;
+  var tabH=fit(36*u,tabPx*1.5), tabY=46*u,
+      padX=fit(17*u,tabPx*0.708), gap=fit(19*u,tabPx*0.792),
+      tabR=tabH*0.278;
+  var ai=Math.max(0,SESSIONS.indexOf(session));
+  var ordered=[SESSIONS[(ai+2)%3],SESSIONS[ai],SESSIONS[(ai+1)%3]];
+  var tabs=ordered.map(function(label){
+    var tw=c.measureText(label).width;
+    return {label:label,tw:tw,w:tw+padX*2};
+  });
+  tabs[1].x=(W-tabs[1].w)/2;
+  tabs[0].x=tabs[1].x-gap-tabs[0].w;
+  tabs[2].x=tabs[1].x+tabs[1].w+gap;
+
+  tabs.forEach(function(t,i){
+    var active=(i===1), cx2=t.x+t.w/2;
+    if(active){
+      c.save();
+      c.shadowColor=P.tabShadow; c.shadowBlur=12; c.shadowOffsetY=3;
+      rr(c,t.x,tabY,t.w,tabH,tabR); c.fillStyle=P.tabBg; c.fill();
+      c.restore();
+    }
+    c.font=tabFont; c.textAlign="center"; c.textBaseline="middle";
+    if(active){ c.fillStyle=P.tabFg; }
+    else{
+      var left=cx2-t.tw/2, f=fade/100;
+      var a0=(1-f).toFixed(3), a1=(1-0.45*f).toFixed(3);
+      var gr=c.createLinearGradient(left,0,left+t.tw,0);
+      if(i===0){
+        gr.addColorStop(0,"rgba("+P.idleRgb+","+a0+")");
+        gr.addColorStop(0.45,"rgba("+P.idleRgb+","+a1+")");
+        gr.addColorStop(1,"rgba("+P.idleRgb+",1)");
+      }else{
+        gr.addColorStop(0,"rgba("+P.idleRgb+",1)");
+        gr.addColorStop(0.55,"rgba("+P.idleRgb+","+a1+")");
+        gr.addColorStop(1,"rgba("+P.idleRgb+","+a0+")");
+      }
+      c.fillStyle=gr;
+    }
+    c.fillText(t.label,cx2,tabY+tabH/2+1*u);
+  });
+
+  /* bottom rail */
+  var symPx=Math.round(28*ut);
+  var iconR=fit(32*u,symPx*1.143), railPad=iconR*0.469;
+  var barH=iconR*2+railPad*2;
+  var barW=railFull?(W-32):Math.min(W-16,(W-32)*u);
+  var barX=(W-barW)/2;
+  var barY=H-(railFull?16:16*u)-barH;
+  glass(c,barX,barY,barW,barH,barH/2,{fill:glassFill(P,tint,1),stroke:P.strokeSoft});
+
+  var cy=barY+barH/2;
+  var iconCX=barX+railPad+iconR;
+  var sym=SYMBOLS.filter(function(s){return s.id===symbol;})[0]||SYMBOLS[0];
+  var symFont="600 "+symPx+"px "+SANS;
+  c.font=symFont;
+  var tw=c.measureText(sym.label).width;
+  var capH=fit(58*u,symPx*2.071), capX=iconCX+iconR*0.42, textX=iconCX+iconR+26*u;
+  glass(c,capX,cy-capH/2,textX-capX+tw+30*u,capH,capH/2,
+        {fill:glassFill(P,tint,1.25),stroke:P.stroke,shadow:false});
+  c.font=symFont; c.fillStyle=P.ink;
+  c.textAlign="left"; c.textBaseline="middle";
+  c.fillText(sym.label,textX,cy+1*u);
+  drawSymbolIcon(c,sym.id,iconCX,cy,iconR);
+
+  /* wordmark */
+  if(opt.mark!==false){
+    var handle=opt.handle===undefined?"YSERTRADES":opt.handle;
+    var markPx=Math.round(26*ut);
+    var markSize=fit(27*u,markPx*1.038), markText=handle?("/ "+handle):"";
+    c.save();
+    if("letterSpacing" in c) c.letterSpacing=(1.2*ut)+"px";
+    c.font="400 "+markPx+"px "+SANS;
+    var mtw=markText?c.measureText(markText).width:0, mgap=markText?fit(14*u,markPx*0.538):0;
+    var gx=W/2-(markSize+mgap+mtw)/2;
+    drawMark(c,opt.logo||"x",gx+markSize/2,cy,markSize,P.ink);
+    if(markText){
+      c.fillStyle=P.ink; c.textAlign="left"; c.textBaseline="middle";
+      c.fillText(markText,gx+markSize+mgap,cy+1*u);
+    }
+    if("letterSpacing" in c) c.letterSpacing="0px";
+    c.restore();
+  }
+
+  /* timeframe pill */
+  var tfPx=Math.round(30*ut);
+  var tfFont="700 "+tfPx+"px "+SANS;
+  c.font=tfFont;
+  var tfw=c.measureText(tf).width;
+  var tfH=fit(62*u,tfPx*2.067);
+  var tfW=Math.max(fit(104*u,tfPx*3.467),tfw+fit(56*u,tfPx*1.867));
+  var tfY=barY-fit(20*u,tfPx*0.667)-tfH;
+  glass(c,(W-tfW)/2,tfY,tfW,tfH,tfH*0.355,{fill:glassFill(P,tint,1.05),stroke:P.strokeSoft});
+  c.font=tfFont; c.fillStyle=P.inkStrong;
+  c.textAlign="center"; c.textBaseline="middle";
+  c.fillText(tf,W/2,tfY+tfH/2+1*u);
+}
+
+/* One visual world, so the figures never branch on a viewer theme. */
+function dark(){ return true; }
+
+/* ══════════════════════ figures ══════════════════════ */
+var heroState={symbol:"NQ",session:"New York",tf:"H4",tint:50,fade:100,seed:7,
+               logo:"x",handle:"YSERTRADES"};
+var hero=document.getElementById("hero");
+var heroCtx=hero.getContext("2d");
+function paintHero(){ drawCard(heroCtx,1920,1080,heroState); }
+
+function buildHeroChips(){
+  var symBox=document.getElementById("heroSym");
+  var sesBox=document.getElementById("heroSess");
+  SYMBOLS.forEach(function(s){
+    var b=document.createElement("button");
+    b.type="button"; b.className="chip"; b.textContent=s.label;
+    b.setAttribute("aria-pressed", heroState.symbol===s.id ? "true":"false");
+    b.addEventListener("click",function(){
+      heroState.symbol=s.id;
+      symBox.querySelectorAll(".chip").forEach(function(o){o.setAttribute("aria-pressed","false");});
+      b.setAttribute("aria-pressed","true");
+      paintHero();
+    });
+    symBox.appendChild(b);
+  });
+  SESSIONS.forEach(function(s){
+    var b=document.createElement("button");
+    b.type="button"; b.className="chip"; b.textContent=s;
+    b.setAttribute("aria-pressed", heroState.session===s ? "true":"false");
+    b.addEventListener("click",function(){
+      heroState.session=s;
+      sesBox.querySelectorAll(".chip").forEach(function(o){o.setAttribute("aria-pressed","false");});
+      b.setAttribute("aria-pressed","true");
+      paintHero();
+    });
+    sesBox.appendChild(b);
+  });
+  var logoBox=document.getElementById("heroLogo");
+  [{id:"x",label:"X"},{id:"instagram",label:"Instagram"}].forEach(function(o){
+    var b=document.createElement("button");
+    b.type="button"; b.className="chip"; b.textContent=o.label;
+    b.setAttribute("aria-pressed", heroState.logo===o.id ? "true":"false");
+    b.addEventListener("click",function(){
+      heroState.logo=o.id;
+      logoBox.querySelectorAll(".chip").forEach(function(c){c.setAttribute("aria-pressed","false");});
+      b.setAttribute("aria-pressed","true");
+      paintHero();
+    });
+    logoBox.appendChild(b);
+  });
+}
+
+/* badge gallery */
+function buildBadges(){
+  var box=document.getElementById("badges");
+  SYMBOLS.forEach(function(s){
+    var wrap=document.createElement("div"); wrap.className="badge";
+    var cv=document.createElement("canvas");
+    var dpr=Math.min(2,window.devicePixelRatio||1);
+    cv.width=34*dpr; cv.height=34*dpr;
+    var c=cv.getContext("2d"); c.setTransform(dpr,0,0,dpr,0,0);
+    drawSymbolIcon(c,s.id,17,17,15);
+    var name=document.createElement("span"); name.textContent=s.label;
+    var note=document.createElement("small"); note.textContent=s.note;
+    wrap.appendChild(cv); wrap.appendChild(name); wrap.appendChild(note);
+    box.appendChild(wrap);
+  });
+}
+
+/* Trim diagram. Both panels show one identical source chart — the only
+   difference is how much of its right edge is read. That is exactly what
+   the Trim control does, so the figure demonstrates the real behaviour
+   rather than a zoom that merely looks similar. */
+var SRC_W=980, SRC_H=420, STEP=26;
+var SRC_FULL=949;            // cuts the last candle roughly in half
+var SRC_TRIM=915;            // 34 px off the right — that candle is gone
+
+function buildTrimSource(){
+  var off=document.createElement("canvas");
+  off.width=SRC_W; off.height=SRC_H;
+  var c=off.getContext("2d");
+  var n=Math.ceil(SRC_W/STEP), data=series(n,23), i, d;
+  var hi=-1e9, lo=1e9;
+  for(i=0;i<n;i++){ if(data[i].h>hi)hi=data[i].h; if(data[i].l<lo)lo=data[i].l; }
+  var pad=(hi-lo)*0.16; hi+=pad; lo-=pad;
+  function py(v){ return SRC_H-((v-lo)/(hi-lo))*SRC_H; }
+
+  c.fillStyle="#fdfdfd"; c.fillRect(0,0,SRC_W,SRC_H);
+  c.strokeStyle="rgba(0,0,0,0.05)"; c.lineWidth=1;
+  for(i=1;i<5;i++){
+    var gy=Math.round((SRC_H/5)*i)+0.5;
+    c.beginPath(); c.moveTo(0,gy); c.lineTo(SRC_W,gy); c.stroke();
+  }
+  var bw=STEP*0.56;
+  for(i=0;i<n;i++){
+    d=data[i];
+    var cx=STEP*(i+0.5), up=d.c>=d.o;
+    c.strokeStyle=up?"#26a69a":"#ef5350"; c.fillStyle=up?"#26a69a":"#ef5350";
+    c.lineWidth=Math.max(1,bw*0.16);
+    c.beginPath(); c.moveTo(cx,py(d.h)); c.lineTo(cx,py(d.l)); c.stroke();
+    var t=py(Math.max(d.o,d.c)), b=py(Math.min(d.o,d.c));
+    c.fillRect(cx-bw/2,t,bw,Math.max(1.5,b-t));
+  }
+  return off;
+}
+var trimSrc=null;
+
+function paintTrim(){
+  var cv=document.getElementById("trim"), c=cv.getContext("2d");
+  var W=880,H=380, gapX=36, panW=(W-gapX)/2, panH=H-46, panY=26;
+  if(!trimSrc) trimSrc=buildTrimSource();
+  c.setTransform(1,0,0,1,0,0);
+  c.clearRect(0,0,W,H);
+  var d=dark();
+  var lab=d?"rgba(233,237,244,0.7)":"rgba(27,26,22,0.66)";
+
+  function panel(x,readW,title){
+    c.save();
+    c.beginPath(); rr(c,x,panY,panW,panH,10); c.clip();
+    c.imageSmoothingEnabled=true; c.imageSmoothingQuality="high";
+    /* read [0..readW] of the source and re-fit it to the same frame */
+    c.drawImage(trimSrc,0,0,readW,SRC_H,x,panY,panW,panH);
+    c.restore();
+    c.save(); rr(c,x,panY,panW,panH,10);
+    c.lineWidth=1.4; c.strokeStyle=d?"rgba(255,255,255,0.16)":"rgba(0,0,0,0.1)"; c.stroke(); c.restore();
+    c.fillStyle=lab;
+    c.font="600 11.5px "+MONO; c.textAlign="left"; c.textBaseline="alphabetic";
+    c.fillText(title,x+2,16);
+  }
+  panel(0,SRC_FULL,"TRIM RIGHT 0");
+  panel(panW+gapX,SRC_TRIM,"TRIM RIGHT 34");
+
+  /* call out the clipped candle on the left panel */
+  c.save();
+  c.strokeStyle="#e03131"; c.lineWidth=1.8; c.setLineDash([5,4]);
+  var mx=panW-7;
+  c.beginPath(); c.moveTo(mx,panY); c.lineTo(mx,panY+panH); c.stroke();
+  c.setLineDash([]);
+  c.fillStyle="#e03131"; c.font="600 11px "+MONO; c.textAlign="right";
+  c.fillText("half candle", mx-8, 16);
+  c.restore();
+}
+
+/* the two marks over a band of chart, proving the outline is see-through */
+function paintMarks(){
+  var cv=document.getElementById("marks"), c=cv.getContext("2d");
+  var W=880,H=300;
+  c.setTransform(1,0,0,1,0,0);
+  c.clearRect(0,0,W,H);
+  var d=dark();
+  c.fillStyle=d?"rgba(255,255,255,0.03)":"#f5f5f5";
+  c.fillRect(0,0,W,H);
+
+  var ink=d?"#e9edf4":"#1c1c1c";
+  drawXMark(c,238,142,132,ink);
+  drawInstaMark(c,642,142,132,ink);
+
+  c.fillStyle=d?"rgba(233,237,244,0.62)":"rgba(27,26,22,0.6)";
+  c.font="600 12px "+MONO; c.textAlign="center"; c.textBaseline="alphabetic";
+  c.fillText("X — FILLED",238,272);
+  c.fillText("INSTAGRAM — OUTLINED",642,272);
+}
+
+/* The rail-width pair: the same card twice, drawn by the same function the
+   hero uses, differing only in the switch. 0.6 rather than 0.55 because the
+   point is the bar's width, not how small the type can get. */
+function paintRail(){
+  [["railFull",true],["railFit",false]].forEach(function(pair){
+    var cv=document.getElementById(pair[0]); if(!cv) return;
+    drawCard(cv.getContext("2d"),cv.width,cv.height,{
+      u:0.6, railFull:pair[1], seed:11, inset:true,
+      symbol:"NQ", session:"New York", tf:"H4", handle:"YSERTRADES", logo:"x"
+    });
+  });
+}
+
+/* session tab strip */
+var tabsCv=document.getElementById("tabs"), tabsCtx=tabsCv.getContext("2d");
+var fadeVal=100;
+function paintTabs(){
+  var c=tabsCtx, W=900, H=150;
+  c.setTransform(1,0,0,1,0,0);
+  c.clearRect(0,0,W,H);
+  var d=dark();
+  c.fillStyle=d?"rgba(255,255,255,0.03)":"#f5f5f5";
+  c.fillRect(0,0,W,H);
+  var u=1.35;
+  var tabFont="600 "+Math.round(29*u)+"px "+SANS;
+  c.font=tabFont;
+  var tabH=58*u, tabY=(H-tabH)/2, padX=26*u, gap=22*u;
+  var ordered=["London","New York","Asia"];
+  var tabs=ordered.map(function(l){ var tw=c.measureText(l).width; return {label:l,tw:tw,w:tw+padX*2}; });
+  tabs[1].x=(W-tabs[1].w)/2;
+  tabs[0].x=tabs[1].x-gap-tabs[0].w;
+  tabs[2].x=tabs[1].x+tabs[1].w+gap;
+  tabs.forEach(function(t,i){
+    var active=(i===1), cx2=t.x+t.w/2;
+    if(active){
+      c.save();
+      c.shadowColor="rgba(0,0,0,0.14)"; c.shadowBlur=16; c.shadowOffsetY=4;
+      rr(c,t.x,tabY,t.w,tabH,tabH/2); c.fillStyle="#46443f"; c.fill();
+      c.restore();
+    }
+    c.font=tabFont; c.textAlign="center"; c.textBaseline="middle";
+    if(active){ c.fillStyle="#ffffff"; }
+    else{
+      var left=cx2-t.tw/2, f=fadeVal/100;
+      var a0=(1-f).toFixed(3), a1=(1-0.45*f).toFixed(3);
+      var base=d?"225,232,242":"189,189,189";
+      var gr=c.createLinearGradient(left,0,left+t.tw,0);
+      if(i===0){
+        gr.addColorStop(0,"rgba("+base+","+a0+")");
+        gr.addColorStop(0.45,"rgba("+base+","+a1+")");
+        gr.addColorStop(1,"rgba("+base+",1)");
+      }else{
+        gr.addColorStop(0,"rgba("+base+",1)");
+        gr.addColorStop(0.55,"rgba("+base+","+a1+")");
+        gr.addColorStop(1,"rgba("+base+","+a0+")");
+      }
+      c.fillStyle=gr;
+    }
+    c.fillText(t.label,cx2,tabY+tabH/2+1*u);
+  });
+}
+var fadeInput=document.getElementById("fade"), fadeOut=document.getElementById("fadeOut");
+fadeInput.addEventListener("input",function(){
+  fadeVal=+fadeInput.value;
+  fadeOut.textContent=fadeVal+"%";
+  paintTabs();
+});
+
+/* the same card on four grounds, every colour derived rather than restyled */
+var GROUNDS=[
+  {hex:"#f5f5f5",name:"Default"},
+  {hex:"#efe9df",name:"Warm linen"},
+  {hex:"#e8eef4",name:"Cool mist"},
+  {hex:"#0f1116",name:"Midnight"}
+];
+function buildGrounds(){
+  var box=document.getElementById("grounds");
+  GROUNDS.forEach(function(o){
+    var w=document.createElement("div"); w.className="ground";
+    var cv=document.createElement("canvas"); cv.width=520; cv.height=293;
+    cv.setAttribute("aria-label","The card rendered on "+o.name);
+    var cap=document.createElement("div"); cap.className="ground-h";
+    var nm=document.createElement("b"); nm.textContent=o.name;
+    var hx=document.createElement("i"); hx.textContent=o.hex.toUpperCase();
+    cap.appendChild(nm); cap.appendChild(hx);
+    w.appendChild(cv); w.appendChild(cap);
+    box.appendChild(w);
+
+    var off=document.createElement("canvas"); off.width=1920; off.height=1080;
+    drawCard(off.getContext("2d"),1920,1080,{
+      bg:o.hex, tint:50, symbol:"NQ", session:"New York", tf:"H4", seed:19, u:1.3,
+      inset:true
+    });
+    var c=cv.getContext("2d");
+    c.imageSmoothingEnabled=true; c.imageSmoothingQuality="high";
+    c.drawImage(off,0,0,1920,1080,0,0,520,293);
+    off.width=0; off.height=0;
+  });
+}
+
+/* tone samples — the rail drawn at three tone values */
+var TONES=[
+  {t:-100,name:"−100 darker",  copy:"Panels sink below the background into a soft grey block. The move for bright, near-white charts."},
+  {t:0,    name:"0 flat",      copy:"Panels take the background exactly. Furniture reads as type floating on the card, nothing behind it."},
+  {t:100,  name:"+100 lighter",copy:"Panels lift toward white and gain opacity. The move for dark or busy charts."}
+];
+function buildTones(){
+  var box=document.getElementById("tones");
+  TONES.forEach(function(o){
+    var w=document.createElement("div"); w.className="tone";
+    var h=document.createElement("div"); h.className="tone-h";
+    var b=document.createElement("b"); b.textContent=o.name;
+    h.appendChild(b);
+    var cv=document.createElement("canvas"); cv.width=520; cv.height=290;
+    cv.setAttribute("aria-label","Card overlay rendered at tone "+o.t);
+    var p=document.createElement("p"); p.textContent=o.copy;
+    w.appendChild(h); w.appendChild(cv); w.appendChild(p);
+    box.appendChild(w);
+
+    var c=cv.getContext("2d");
+    /* render the real card at 1920x1080 then scale it into the tile */
+    var off=document.createElement("canvas"); off.width=1920; off.height=1080;
+    drawCard(off.getContext("2d"),1920,1080,{
+      tint:o.t, symbol:"ES", session:"London", tf:"M15", seed:41, u:1.25, bg:"#f5f5f5"
+    });
+    c.imageSmoothingEnabled=true; c.imageSmoothingQuality="high";
+    c.drawImage(off,0,0,1920,1080,0,0,520,290);
+    off.width=0; off.height=0;
+  });
+}
+
+/* ══════════════════════ deck navigation ══════════════════════ */
+var slides=[].slice.call(document.querySelectorAll(".slide"));
+var dotsBox=document.getElementById("dots");
+var prevBtn=document.getElementById("prev"), nextBtn=document.getElementById("next");
+var curOut=document.getElementById("cur"), totOut=document.getElementById("tot");
+var progressBar=document.getElementById("progressBar");
+var idx=0;
+totOut.textContent=slides.length;
+
+slides.forEach(function(s,i){
+  var b=document.createElement("button");
+  b.type="button"; b.className="dot"; b.setAttribute("role","tab");
+  b.setAttribute("aria-selected", i===0?"true":"false");
+  b.setAttribute("aria-label", (i+1)+". "+(s.dataset.title||""));
+  b.title=s.dataset.title||"";
+  b.addEventListener("click",function(){ go(i); });
+  dotsBox.appendChild(b);
+});
+var dots=[].slice.call(dotsBox.children);
+
+function go(n){
+  n=Math.max(0,Math.min(slides.length-1,n));
+  if(n===idx && slides[idx].classList.contains("on")) return;
+
+  /* The outgoing slide goes at once. Nothing is held behind the new card, so
+     there is nothing to ghost through it. */
+  slides[idx].classList.remove("on");
+  dots[idx].setAttribute("aria-selected","false");
+
+  idx=n;
+  slides[idx].classList.add("on");
+  slides[idx].scrollTop=0;
+  dots[idx].setAttribute("aria-selected","true");
+  curOut.textContent=idx+1;
+  prevBtn.disabled=(idx===0);
+  nextBtn.disabled=(idx===slides.length-1);
+  progressBar.style.width=((idx+1)/slides.length*100)+"%";
+}
+prevBtn.addEventListener("click",function(){ go(idx-1); });
+nextBtn.addEventListener("click",function(){ go(idx+1); });
+
+window.addEventListener("keydown",function(e){
+  var tag=(e.target.tagName||"").toLowerCase();
+  if(tag==="input"||tag==="textarea"||tag==="select") return;
+  if(e.key==="ArrowRight"||e.key==="PageDown"){ go(idx+1); e.preventDefault(); }
+  else if(e.key==="ArrowLeft"||e.key==="PageUp"){ go(idx-1); e.preventDefault(); }
+  else if(e.key==="Home"){ go(0); e.preventDefault(); }
+  else if(e.key==="End"){ go(slides.length-1); e.preventDefault(); }
+});
+
+/* Swipe. Listening on the document means a drag anywhere counts, so dragging
+   the fade slider used to read as a swipe and turn the page instead of moving
+   the handle. A gesture that starts on a control belongs to that control. */
+var SWIPE_IGNORE="input,button,a,select,textarea,label,.nav,[role=tab]";
+var sx=0, sy=0, tracking=false;
+document.addEventListener("pointerdown",function(e){
+  if(e.pointerType==="mouse") return;
+  var t=e.target;
+  if(t && t.closest && t.closest(SWIPE_IGNORE)){ tracking=false; return; }
+  sx=e.clientX; sy=e.clientY; tracking=true;
+});
+document.addEventListener("pointercancel",function(){ tracking=false; });
+document.addEventListener("pointerup",function(e){
+  if(!tracking) return;
+  tracking=false;
+  var dx=e.clientX-sx, dy=e.clientY-sy;
+  if(Math.abs(dx)>60 && Math.abs(dx)>Math.abs(dy)*1.6) go(idx+(dx<0?1:-1));
+});
+
+/* ══════════════════════ boot ══════════════════════ */
+function repaintAll(){
+  paintHero();
+  paintTrim();
+  paintTabs();
+  paintMarks();
+  paintRail();
+}
+/* Two exits, one shown. Framed, the host owns navigation and a link would only
+   nest another copy of it inside this frame, so the button asks the host to
+   take over. Standalone, there is no host to ask and the link is the exit. */
+var inFrame=(function(){ try{ return window.self!==window.top; }catch(e){ return true; } })();
+function leave(){ try{ parent.postMessage({type:"guide:back"},"*"); }catch(err){} }
+
+if(inFrame){
+  document.getElementById("back").hidden=false;
+  document.getElementById("back").addEventListener("click",leave);
+  /* Esc pressed in here cannot reach the host's document, so hand it back. */
+  window.addEventListener("keydown",function(e){
+    if(e.key==="Escape"){ leave(); }
+  });
+}else if(/(^|\/)guide\.html?$/i.test(location.pathname) || location.protocol==="file:"){
+  document.getElementById("home").hidden=false;
+}
+
+buildHeroChips();
+buildBadges();
+buildGrounds();
+buildTones();
+go(0);
+repaintAll();
+
+
+/* the canvases measure text, so redraw once webfonts settle */
+if(document.fonts && document.fonts.ready){
+  document.fonts.ready.then(repaintAll).catch(function(){});
+}
+})();
+</script>
+
+
+<!-- ═══════════════════════ THE FIELD ═══════════════════════
+     A port of the app's Particles component, kept deliberately literal: COUNT,
+     GROW, INNER, OUTER, the log-uniform spawn, the three width buckets and the
+     seeded hash are the same numbers. They have to be. The deck sits behind
+     the same tab switcher as the dial, on the same ground, under the same
+     glass — if the field flew at a different speed or spread here you would
+     see the seam every time you crossed between them.
+
+     IT IS A STARFIELD, NOT DRIFTING DOTS, and the difference is not cosmetic.
+     Stars fly outward from the centre and the streak they leave IS the line
+     from where each one was last frame to where it is now. There is no trail
+     to manage, and there is no per-dot clear either: what erases the previous
+     frame is a fill of the WHOLE surface, which is the one thing the dots
+     never needed. That fill is the entire cost of this field and it scales
+     with pixels rather than with stars, which is why the DPR is capped at 1.
+     Measured on the app's own bench: the drifting field cost 84 dropped frames
+     in 360; this costs two.
+
+     So the note that used to live here — "the canvas is TRANSPARENT and never
+     changes opacity" — is no longer true and could not be. The canvas is
+     opaque and filled with #121212 every frame, which is invisible only
+     because it is the deck's own ground. Keep the two in step.
+
+     WHY IT IS IN HERE, unchanged and still load-bearing: it used to be a
+     position:fixed canvas at body level, and a fixed layer's order against a
+     fading slide is the compositor's to reinterpret. In here the field and the
+     slides are siblings in the deck's own stacking context, and painting order
+     within a stacking context is not negotiable.
+
+     It does not stop while the document is showing. A background that freezes
+     the moment you look away is a background you notice. -->
+<script>
+(function(){
+  var canvas = document.getElementById('field');
+  if(!canvas || !canvas.getContext) return;
+  var ctx = canvas.getContext('2d');
+  if(!ctx) return;
+
+  var COUNT = 52;
+  var GROW  = 1.0075;   /* radius multiplier per frame; streak = rad*(GROW-1) */
+  var INNER = 0.62;     /* fraction of the half-height — nothing starts inside */
+  var OUTER = 1.18;     /* fraction of the half-diagonal — they leave by the corners */
+  var GROUND = '#121212';
+  var MAX_DPR = 1;
+
+  function seeded(n){ return Math.abs(Math.sin(n*9999.123 + 78.233) * 43758.5453) % 1; }
+
+  var reduced = window.matchMedia
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var dpr = Math.min(MAX_DPR, Math.max(1, window.devicePixelRatio || 1));
+
+  var raf = 0, w = 0, h = 0, cx = 0, cy = 0;
+  var inner = 0, outer = 0, span = 1, prevInner = 0;
+
+  var ang = new Float32Array(COUNT);
+  var rad = new Float32Array(COUNT);
+  var pr  = new Float32Array(COUNT);
+  var fresh = new Uint8Array(COUNT);
+
+  /* Log-uniform, because the radius grows by a constant FACTOR: a field spread
+     evenly in log(radius) stays spread evenly for ever, where one spread evenly
+     in radius bunches at the inside within seconds. */
+  function put(i,a,u){
+    ang[i] = a * Math.PI * 2;
+    rad[i] = inner * Math.exp(u * span);
+    fresh[i] = 1;
+  }
+  function seed(){ for(var i=0;i<COUNT;i++) put(i, seeded(i+1.3), seeded(i+5.5)); }
+  /* Recycled stars re-enter at the INNER edge, where the flow starts — a random
+     radius would break the steady state the spawn distribution buys. */
+  function recycle(i){ put(i, Math.random(), 0); }
+
+  /* ── Why the field watches the slide's opacity ──────────────────────────
+     A slide fades in over a field that does not fade with it, and the panel is
+     only rgba(0,0,0,.2) — so while the card is half there you see the field
+     RAW, at a strength the finished card never shows. It gets worse in WebKit,
+     where an ancestor below opacity 1 establishes a backdrop root and the
+     panel's blur stops sampling anything at all for the length of the fade.
+
+     Not to zero, though. There is always a slide on screen — unlike a tab, the
+     deck is never arriving from nothing — so taking the field to zero and back
+     would be a blink of the whole background, which is worse than the fault.
+     FLOOR is how far down it may go. */
+  var FLOOR = 0.55;
+  var slideEl = null;
+  function surfaceAlpha(){
+    if(!slideEl || !slideEl.isConnected || !slideEl.classList.contains('on'))
+      slideEl = document.querySelector('.slide.on');
+    if(!slideEl) return 1;
+    var o = parseFloat(getComputedStyle(slideEl).opacity);
+    if(!isFinite(o)) o = 1;
+    return FLOOR + (1 - FLOOR) * o;
+  }
+
+  var BUCKETS = 3;
+  var WIDTHS = [0.6, 0.9, 1.3];
+  var ALPHAS = [0.13, 0.22, 0.34];
+
+  function draw(move){
+    /* Opaque, and in the ground's own colour. This fill is what erases the
+       previous frame; a transparent clear would leave every streak on the
+       canvas for ever. */
+    ctx.fillStyle = GROUND;
+    ctx.fillRect(0,0,w,h);
+
+    var fade = surfaceAlpha();
+    if(move){
+      for(var i=0;i<COUNT;i++){
+        rad[i] *= GROW;
+        if(rad[i] > outer) recycle(i);
+      }
+    }
+
+    /* Three width buckets rather than a path each: every beginPath/stroke pair
+       is its own rasteriser run, so N stars would cost N of them. Bucketed on
+       the same log scale the field is spread on, the three bands hold roughly
+       equal numbers. */
+    for(var b=0;b<BUCKETS;b++){
+      ctx.lineWidth = WIDTHS[b];
+      ctx.beginPath();
+      var any = false;
+      for(var j=0;j<COUNT;j++){
+        var r = rad[j];
+        var k = Math.log(r/inner) / span;
+        if(Math.floor(k*BUCKETS*0.999) !== b) continue;
+        var c = Math.cos(ang[j]), sn = Math.sin(ang[j]);
+        var nx = cx + c*r, ny = cy + sn*r;
+        if(!fresh[j] && nx > -30 && nx < w+30 && ny > -30 && ny < h+30){
+          ctx.moveTo(cx + c*pr[j], cy + sn*pr[j]);
+          ctx.lineTo(nx, ny);
+          any = true;
+        }
+        pr[j] = r; fresh[j] = 0;
+      }
+      if(any){
+        var a = ALPHAS[b] * fade;
+        ctx.strokeStyle = 'rgba(255,255,255,' + a.toFixed(3) + ')';
+        ctx.stroke();
+      }
+    }
+  }
+
+  function resize(){
+    var rect = canvas.getBoundingClientRect();
+    var nw = Math.max(1, rect.width), nh = Math.max(1, rect.height);
+    if(nw === w && nh === h) return;
+    var first = w === 0;
+    w = nw; h = nh;
+    cx = w/2; cy = h/2;
+    inner = INNER * (h/2);
+    outer = OUTER * (Math.hypot(w,h)/2);
+    span = Math.log(outer/inner);
+    canvas.width = Math.floor(w*dpr);
+    canvas.height = Math.floor(h*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.lineCap = 'round';
+    /* Re-seeding on a resize would blank and teleport the field, and on iOS the
+       address bar alone fires this. Only the first sizing seeds; after that the
+       angles are kept and the radii are rescaled. */
+    if(first) seed();
+    else {
+      var kk = inner / prevInner || 1;
+      for(var i=0;i<COUNT;i++){ rad[i] *= kk; fresh[i] = 1; }
+    }
+    prevInner = inner;
+    draw(false);
+  }
+
+  function loop(){ draw(true); raf = requestAnimationFrame(loop); }
+  function kick(){ if(raf || reduced || document.hidden) return; raf = requestAnimationFrame(loop); }
+  function stop(){ if(raf){ cancelAnimationFrame(raf); raf = 0; } }
+
+  /* Coming back has to work from every direction a browser offers, because
+     they do not agree on which one fires: backgrounding gives you
+     visibilitychange, the back/forward cache gives you pageshow, and switching
+     apps on iOS can give you nothing but focus. Miss the one your browser used
+     and the field is simply stopped. */
+  document.addEventListener('visibilitychange', function(){ if(document.hidden) stop(); else kick(); });
+  window.addEventListener('pageshow', kick);
+  window.addEventListener('focus', kick);
+  window.addEventListener('resize', resize);
+
+  resize();
+  kick();
+})();
+</script>
+
+</body>
+</html>
